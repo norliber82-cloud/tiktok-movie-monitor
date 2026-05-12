@@ -69,6 +69,28 @@ def get_conn() -> sqlite3.Connection:
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns that newer versions of the schema introduced but old
+    databases don't yet have. Safe to run repeatedly."""
+    wanted = {
+        "videos": [
+            ("language",       "TEXT"),
+            ("tier",           "TEXT"),
+            ("bitable_synced", "INTEGER DEFAULT 0"),
+        ],
+        "authors": [],  # created fresh; nothing to migrate
+    }
+    for table, cols in wanted.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols:
+            if name not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                except sqlite3.OperationalError:
+                    pass
 
 
 # ---------- videos ----------
