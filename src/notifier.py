@@ -1,9 +1,8 @@
-"""Feishu (Lark) custom-bot notifier."""
+"""Feishu (Lark) custom-bot notifier — tiered video alerts + creator alerts."""
 
 import base64
 import hashlib
 import hmac
-import json
 import logging
 import os
 import time
@@ -13,33 +12,49 @@ from typing import Optional
 import requests
 
 from . import db
+from .classifier import tier_meta
 
 logger = logging.getLogger(__name__)
 
+_LANG_FLAG = {"en": "🇺🇸 EN", "ja": "🇯🇵 JA", "zh": "🇨🇳 ZH",
+              "ko": "🇰🇷 KO", "es": "🇪🇸 ES", "pt": "🇵🇹 PT"}
 
-def _feishu_sign(secret: str, timestamp: int) -> str:
-    """Compute the HMAC-SHA256 signature required by Feishu when
-    'signature verification' is enabled on the custom bot."""
-    string_to_sign = f"{timestamp}\n{secret}"
-    digest = hmac.new(
-        string_to_sign.encode("utf-8"),
-        b"",
-        digestmod=hashlib.sha256,
-    ).digest()
+
+def _feishu_sign(secret: str, ts: int) -> str:
+    s = f"{ts}\n{secret}"
+    digest = hmac.new(s.encode("utf-8"), b"", digestmod=hashlib.sha256).digest()
     return base64.b64encode(digest).decode("utf-8")
 
 
-def _format_time(ts: int) -> str:
+def _send(webhook: str, secret: Optional[str], payload: dict) -> bool:
+    if secret:
+        ts = int(time.time())
+        payload = {**payload, "timestamp": str(ts), "sign": _feishu_sign(secret, ts)}
+    try:
+        resp = requests.post(webhook, json=payload, timeout=10)
+        data = resp.json()
+    except Exception as exc:
+        logger.exception("Feishu POST failed: %s", exc)
+        return False
+    ok = data.get("code", data.get("StatusCode", -1)) == 0
+    if not ok:
+        logger.error("Feishu rejected payload: %s", data)
+    return ok
+
+
+def _fmt_time(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _build_card(row) -> dict:
-    """Build an interactive Feishu card for a single qualifying video."""
-    caption = (row["caption"] or "").strip()
-    if len(caption) > 200:
-        caption = caption[:197] + "..."
+# ------------------------- video card -------------------------
 
-    age_hours = (int(time.time()) - int(row["create_time"])) / 3600
+def _build_video_card(row) -> dict:
+    meta = tier_meta(row["tier"]) or {"label": row["tier"], "color": "blue"}
+    cap = (row["caption"] or "").strip()
+    if len(cap) > 200:
+        cap = cap[:197] + "..."
+    age_h = (int(time.time()) - int(row["create_time"])) / 3600.0
+    lang_tag = _LANG_FLAG.get(row["language"] or "", row["language"] or "??")
 
     fields = [
         {"is_short": True, "text": {"tag": "lark_md",
@@ -51,16 +66,15 @@ def _build_card(row) -> dict:
         {"is_short": True, "text": {"tag": "lark_md",
             "content": f"**🔁 分享**\n{row['share_count']:,}"}},
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**⏱️ 时长**\n{row['duration']}s"}},
+            "content": f"**⏱️ 时长 / 🗣️**\n{row['duration']}s · {lang_tag}"}},
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**📅 发布**\n{_format_time(row['create_time'])}\n({age_hours:.1f}h ago)"}},
+            "content": f"**📅 发布**\n{_fmt_time(row['create_time'])}\n({age_h:.1f}h ago)"}},
     ]
-
     elements = [
         {"tag": "div", "text": {"tag": "lark_md",
             "content": f"**@{row['author_unique']}** · #{row['matched_tag']}"}},
         {"tag": "div", "text": {"tag": "lark_md",
-            "content": caption or "_(no caption)_"}},
+            "content": cap or "_(no caption)_"}},
         {"tag": "div", "fields": fields},
     ]
     if row["hashtags"]:
@@ -70,41 +84,61 @@ def _build_card(row) -> dict:
     elements.append({"tag": "action", "actions": [
         {"tag": "button",
          "text": {"tag": "plain_text", "content": "🎬 Open on TikTok"},
-         "url": row["video_url"],
-         "type": "primary"}]})
+         "url": row["video_url"], "type": "primary"}]})
 
     return {
         "msg_type": "interactive",
         "card": {
             "config": {"wide_screen_mode": True},
-            "header": {
-                "template": "red",
-                "title": {"tag": "plain_text",
-                          "content": f"🔥 1M+ in {max(1, int(age_hours/24))}d"},
-            },
+            "header": {"template": meta["color"],
+                       "title": {"tag": "plain_text", "content": meta["label"]}},
             "elements": elements,
         },
     }
 
 
-def _send(webhook: str, secret: Optional[str], payload: dict) -> bool:
-    if secret:
-        ts = int(time.time())
-        payload = {**payload, "timestamp": str(ts), "sign": _feishu_sign(secret, ts)}
+# ------------------------- creator card -------------------------
 
-    try:
-        resp = requests.post(webhook, json=payload, timeout=10)
-        data = resp.json()
-    except Exception as exc:
-        logger.exception("Feishu POST failed: %s", exc)
-        return False
+def _build_creator_card(row) -> dict:
+    lang_tag = _LANG_FLAG.get(row["language"] or "", row["language"] or "??")
+    fields = [
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**📊 中位播放**\n{row['median_plays']:,}"}},
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**🚀 7日最大**\n{row['max_plays_7d']:,}"}},
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**🗓️ 14d 发帖**\n{row['posts_14d']}"}},
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**🗓️ 30d 发帖**\n{row['posts_30d']}"}},
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**🎯 垂直度**\n{(row['vertical_ratio'] or 0) * 100:.0f}%"}},
+        {"is_short": True, "text": {"tag": "lark_md",
+            "content": f"**👥 粉丝 / 🗣️**\n{(row['follower_count'] or 0):,} · {lang_tag}"}},
+    ]
+    elements = [
+        {"tag": "div", "text": {"tag": "lark_md",
+            "content": f"**@{row['author_unique']}**" +
+                       (f" ({row['nickname']})" if row['nickname'] else "")}},
+        {"tag": "div", "fields": fields},
+        {"tag": "action", "actions": [
+            {"tag": "button",
+             "text": {"tag": "plain_text", "content": "👤 Open profile"},
+             "url": f"https://www.tiktok.com/@{row['author_unique']}",
+             "type": "primary"}]},
+    ]
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {"template": "green",
+                       "title": {"tag": "plain_text",
+                                 "content": "🌱 New creator to monitor"}},
+            "elements": elements,
+        },
+    }
 
-    # Feishu returns {"code":0,"msg":"ok"} on success, or {"StatusCode":0,...} on legacy.
-    ok = data.get("code", data.get("StatusCode", -1)) == 0
-    if not ok:
-        logger.error("Feishu rejected payload: %s", data)
-    return ok
 
+# ------------------------- public API -------------------------
 
 def push_new_hits() -> int:
     webhook = os.getenv("FEISHU_WEBHOOK", "").strip()
@@ -113,44 +147,35 @@ def push_new_hits() -> int:
         return 0
     secret = os.getenv("FEISHU_SECRET", "").strip() or None
 
-    rows = db.fetch_unalerted(min_views=1_000_000)
+    rows = db.fetch_unalerted_videos()
     if not rows:
         logger.info("No new qualifying videos to push")
         return 0
 
     pushed = []
     for row in rows:
-        card = _build_card(row)
-        if _send(webhook, secret, card):
+        if _send(webhook, secret, _build_video_card(row)):
             pushed.append(row["video_id"])
-            # polite spacing to avoid Feishu rate limits (100 msgs/min per bot)
             time.sleep(1.2)
-        else:
-            logger.warning("Skip marking %s as alerted (send failed)", row["video_id"])
-
-    db.mark_alerted(pushed, tier=1_000_000)
+    db.mark_videos_alerted(pushed)
     logger.info("Pushed %d / %d qualifying videos", len(pushed), len(rows))
     return len(pushed)
 
 
-def push_summary(scan_hits: int) -> None:
-    """Send a small summary ping each run so you know the cron is alive."""
+def push_new_creators() -> int:
     webhook = os.getenv("FEISHU_WEBHOOK", "").strip()
     if not webhook:
-        return
+        return 0
     secret = os.getenv("FEISHU_SECRET", "").strip() or None
-    stats = db.recent_stats()
-    payload = {
-        "msg_type": "text",
-        "content": {
-            "text": (
-                f"[TikTok Movie Monitor] run ok\n"
-                f"this run qualifying: {scan_hits}\n"
-                f"total stored: {stats['total']} | alerted: {stats['alerted']}\n"
-                f"ts: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
-            )
-        },
-    }
-    # Only send the heartbeat if SEND_HEARTBEAT is truthy
-    if os.getenv("SEND_HEARTBEAT", "").lower() in ("1", "true", "yes"):
-        _send(webhook, secret, payload)
+
+    rows = db.fetch_unalerted_monitored_authors()
+    if not rows:
+        return 0
+    pushed = []
+    for row in rows:
+        if _send(webhook, secret, _build_creator_card(row)):
+            pushed.append(row["author_unique"])
+            time.sleep(1.2)
+    db.mark_authors_alerted(pushed)
+    logger.info("Pushed %d / %d creators", len(pushed), len(rows))
+    return len(pushed)

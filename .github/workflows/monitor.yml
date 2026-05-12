@@ -2,11 +2,9 @@ name: Monitor
 
 on:
   schedule:
-    # Every 45 minutes. Note: GitHub cron granularity is 5 min; actual runs may drift.
     - cron: "*/45 * * * *"
   workflow_dispatch: {}
 
-# Only one run at a time; cancel older queued ones.
 concurrency:
   group: monitor
   cancel-in-progress: false
@@ -23,7 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Fetch full history so we can commit the DB back.
           fetch-depth: 0
 
       - name: Setup Python
@@ -44,8 +41,14 @@ jobs:
         env:
           MS_TOKEN: ${{ secrets.MS_TOKEN }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
-          SEND_HEARTBEAT: "false"
+          FEISHU_SECRET:  ${{ secrets.FEISHU_SECRET }}
+
+          FEISHU_APP_ID:          ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET:      ${{ secrets.FEISHU_APP_SECRET }}
+          BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
+          BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
+          BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
+
           PYTHONUNBUFFERED: "1"
         run: python -m src.main
 
@@ -63,5 +66,5 @@ jobs:
               echo "No DB changes."
             fi
           else
-            echo "videos.db not found (first run?)."
+            echo "videos.db not found."
           fi

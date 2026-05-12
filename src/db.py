@@ -9,29 +9,54 @@ DB_PATH = os.getenv("DB_PATH", "videos.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
-    video_id        TEXT PRIMARY KEY,
-    author_id       TEXT,
-    author_unique   TEXT,
-    caption         TEXT,
-    hashtags        TEXT,
-    create_time     INTEGER,
-    play_count      INTEGER,
-    like_count      INTEGER,
-    comment_count   INTEGER,
-    share_count     INTEGER,
-    duration        INTEGER,
-    video_url       TEXT,
-    cover_url       TEXT,
-    matched_tag     TEXT,
-    first_seen_at   INTEGER,
-    last_checked_at INTEGER,
-    alerted         INTEGER DEFAULT 0,
-    alert_tier      INTEGER DEFAULT 0
+    video_id         TEXT PRIMARY KEY,
+    author_id        TEXT,
+    author_unique    TEXT,
+    caption          TEXT,
+    hashtags         TEXT,
+    create_time      INTEGER,
+    play_count       INTEGER,
+    like_count       INTEGER,
+    comment_count    INTEGER,
+    share_count      INTEGER,
+    duration         INTEGER,
+    video_url        TEXT,
+    cover_url        TEXT,
+    matched_tag      TEXT,
+    language         TEXT,
+    tier             TEXT,
+    first_seen_at    INTEGER,
+    last_checked_at  INTEGER,
+    alerted          INTEGER DEFAULT 0,
+    bitable_synced   INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_create_time ON videos(create_time);
 CREATE INDEX IF NOT EXISTS idx_play_count  ON videos(play_count);
 CREATE INDEX IF NOT EXISTS idx_alerted     ON videos(alerted);
+CREATE INDEX IF NOT EXISTS idx_bitable     ON videos(bitable_synced);
+
+CREATE TABLE IF NOT EXISTS authors (
+    author_unique         TEXT PRIMARY KEY,
+    author_id             TEXT,
+    nickname              TEXT,
+    follower_count        INTEGER,
+    median_plays          INTEGER,
+    max_plays_7d          INTEGER,
+    posts_14d             INTEGER,
+    posts_30d             INTEGER,
+    vertical_ratio        REAL,
+    language              TEXT,
+    status                TEXT,    -- NEW / REJECTED / MONITORED
+    reason                TEXT,
+    last_evaluated_at     INTEGER,
+    first_seen_at         INTEGER,
+    bitable_synced        INTEGER DEFAULT 0,
+    alerted               INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_author_status  ON authors(status);
+CREATE INDEX IF NOT EXISTS idx_author_last    ON authors(last_evaluated_at);
 """
 
 
@@ -46,6 +71,8 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
 
 
+# ---------- videos ----------
+
 def upsert_video(row: dict) -> None:
     now = int(time.time())
     with get_conn() as conn:
@@ -55,12 +82,12 @@ def upsert_video(row: dict) -> None:
                 video_id, author_id, author_unique, caption, hashtags,
                 create_time, play_count, like_count, comment_count,
                 share_count, duration, video_url, cover_url, matched_tag,
-                first_seen_at, last_checked_at
+                language, tier, first_seen_at, last_checked_at
             ) VALUES (
                 :video_id, :author_id, :author_unique, :caption, :hashtags,
                 :create_time, :play_count, :like_count, :comment_count,
                 :share_count, :duration, :video_url, :cover_url, :matched_tag,
-                :first_seen_at, :last_checked_at
+                :language, :tier, :first_seen_at, :last_checked_at
             )
             ON CONFLICT(video_id) DO UPDATE SET
                 play_count      = excluded.play_count,
@@ -69,34 +96,186 @@ def upsert_video(row: dict) -> None:
                 share_count     = excluded.share_count,
                 caption         = excluded.caption,
                 hashtags        = excluded.hashtags,
+                language        = excluded.language,
+                tier            = CASE
+                                    WHEN excluded.tier IS NULL THEN videos.tier
+                                    WHEN videos.tier IS NULL THEN excluded.tier
+                                    ELSE excluded.tier
+                                  END,
                 last_checked_at = excluded.last_checked_at
             """,
             {**row, "first_seen_at": now, "last_checked_at": now},
         )
 
 
-def fetch_unalerted(min_views: int) -> list[sqlite3.Row]:
+def fetch_unalerted_videos() -> list[sqlite3.Row]:
     with get_conn() as conn:
-        cur = conn.execute(
+        return conn.execute(
             """
             SELECT * FROM videos
-            WHERE alerted = 0 AND play_count >= ?
-            ORDER BY play_count DESC
-            """,
-            (min_views,),
-        )
-        return cur.fetchall()
+            WHERE alerted = 0 AND tier IS NOT NULL
+            ORDER BY
+              CASE tier WHEN 'RED' THEN 1 WHEN 'ORANGE' THEN 2 WHEN 'YELLOW' THEN 3 ELSE 4 END,
+              play_count DESC
+            """
+        ).fetchall()
 
 
-def mark_alerted(video_ids: Iterable[str], tier: Optional[int] = None) -> None:
+def mark_videos_alerted(video_ids: Iterable[str]) -> None:
     if not video_ids:
         return
     with get_conn() as conn:
-        for vid in video_ids:
-            conn.execute(
-                "UPDATE videos SET alerted = 1, alert_tier = COALESCE(?, alert_tier) WHERE video_id = ?",
-                (tier, vid),
-            )
+        conn.executemany(
+            "UPDATE videos SET alerted = 1 WHERE video_id = ?",
+            [(v,) for v in video_ids],
+        )
+
+
+def fetch_unsynced_videos(limit: int = 200) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM videos
+            WHERE bitable_synced = 0 AND tier IS NOT NULL
+            ORDER BY create_time DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+
+def mark_videos_synced(video_ids: Iterable[str]) -> None:
+    if not video_ids:
+        return
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE videos SET bitable_synced = 1 WHERE video_id = ?",
+            [(v,) for v in video_ids],
+        )
+
+
+# ---------- authors ----------
+
+def touch_author_candidate(
+    author_unique: str,
+    author_id: str,
+    nickname: Optional[str] = None,
+    language: Optional[str] = None,
+) -> None:
+    """Called whenever we encounter an author in a scanned video.
+    Inserts a NEW candidate if we've never seen this author."""
+    now = int(time.time())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO authors (
+                author_unique, author_id, nickname, language,
+                status, first_seen_at
+            ) VALUES (?, ?, ?, ?, 'NEW', ?)
+            ON CONFLICT(author_unique) DO UPDATE SET
+                author_id = COALESCE(authors.author_id, excluded.author_id),
+                nickname  = COALESCE(excluded.nickname, authors.nickname),
+                language  = COALESCE(excluded.language, authors.language)
+            """,
+            (author_unique, author_id, nickname, language, now),
+        )
+
+
+def update_author_profile(row: dict) -> None:
+    now = int(time.time())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE authors SET
+                nickname          = COALESCE(:nickname, nickname),
+                follower_count    = :follower_count,
+                median_plays      = :median_plays,
+                max_plays_7d      = :max_plays_7d,
+                posts_14d         = :posts_14d,
+                posts_30d         = :posts_30d,
+                vertical_ratio    = :vertical_ratio,
+                language          = COALESCE(:language, language),
+                status            = :status,
+                reason            = :reason,
+                last_evaluated_at = :now,
+                alerted = CASE
+                    WHEN :status = 'MONITORED' AND alerted = 0 THEN 0
+                    ELSE alerted
+                END
+            WHERE author_unique = :author_unique
+            """,
+            {**row, "now": now},
+        )
+
+
+def fetch_authors_to_evaluate(limit: int, reject_reeval_seconds: int,
+                              monitored_refresh_seconds: int) -> list[sqlite3.Row]:
+    """Pick authors to (re)evaluate: new first, then stale monitored,
+    then stale rejected."""
+    now = int(time.time())
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM authors
+            WHERE
+              (status = 'NEW') OR
+              (status = 'MONITORED' AND (last_evaluated_at IS NULL OR
+                    ? - last_evaluated_at > ?)) OR
+              (status = 'REJECTED' AND (last_evaluated_at IS NULL OR
+                    ? - last_evaluated_at > ?))
+            ORDER BY
+              CASE status
+                WHEN 'NEW' THEN 0
+                WHEN 'MONITORED' THEN 1
+                WHEN 'REJECTED' THEN 2
+                ELSE 3
+              END,
+              COALESCE(last_evaluated_at, 0) ASC
+            LIMIT ?
+            """,
+            (now, monitored_refresh_seconds,
+             now, reject_reeval_seconds, limit),
+        ).fetchall()
+
+
+def fetch_unalerted_monitored_authors() -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM authors WHERE status = 'MONITORED' AND alerted = 0"
+        ).fetchall()
+
+
+def mark_authors_alerted(author_uniques: Iterable[str]) -> None:
+    if not author_uniques:
+        return
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE authors SET alerted = 1 WHERE author_unique = ?",
+            [(u,) for u in author_uniques],
+        )
+
+
+def fetch_unsynced_monitored_authors(limit: int = 200) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM authors
+            WHERE status = 'MONITORED' AND bitable_synced = 0
+            ORDER BY last_evaluated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+
+def mark_authors_synced(author_uniques: Iterable[str]) -> None:
+    if not author_uniques:
+        return
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE authors SET bitable_synced = 1 WHERE author_unique = ?",
+            [(u,) for u in author_uniques],
+        )
 
 
 def recent_stats() -> dict:
@@ -105,4 +284,7 @@ def recent_stats() -> dict:
         alerted = conn.execute(
             "SELECT COUNT(*) AS n FROM videos WHERE alerted = 1"
         ).fetchone()["n"]
-    return {"total": total, "alerted": alerted}
+        monitored = conn.execute(
+            "SELECT COUNT(*) AS n FROM authors WHERE status = 'MONITORED'"
+        ).fetchone()["n"]
+    return {"total": total, "alerted": alerted, "monitored": monitored}
