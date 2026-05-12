@@ -68,7 +68,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git stash push --include-untracked -- videos.db || true
           git pull --rebase origin main || true
+          git stash pop || true
           if [[ -f videos.db ]]; then
             git add videos.db
             if ! git diff --cached --quiet; then
