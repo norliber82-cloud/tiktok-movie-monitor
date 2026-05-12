@@ -7,7 +7,9 @@ from typing import Iterable, Optional
 
 DB_PATH = os.getenv("DB_PATH", "videos.db")
 
-SCHEMA = """
+# Step 1: create tables (without indexes on columns that might not exist yet
+# on older DBs). Migration runs after this to add missing columns.
+TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS videos (
     video_id         TEXT PRIMARY KEY,
     author_id        TEXT,
@@ -31,11 +33,6 @@ CREATE TABLE IF NOT EXISTS videos (
     bitable_synced   INTEGER DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_create_time ON videos(create_time);
-CREATE INDEX IF NOT EXISTS idx_play_count  ON videos(play_count);
-CREATE INDEX IF NOT EXISTS idx_alerted     ON videos(alerted);
-CREATE INDEX IF NOT EXISTS idx_bitable     ON videos(bitable_synced);
-
 CREATE TABLE IF NOT EXISTS authors (
     author_unique         TEXT PRIMARY KEY,
     author_id             TEXT,
@@ -47,17 +44,34 @@ CREATE TABLE IF NOT EXISTS authors (
     posts_30d             INTEGER,
     vertical_ratio        REAL,
     language              TEXT,
-    status                TEXT,    -- NEW / REJECTED / MONITORED
+    status                TEXT,
     reason                TEXT,
     last_evaluated_at     INTEGER,
     first_seen_at         INTEGER,
     bitable_synced        INTEGER DEFAULT 0,
     alerted               INTEGER DEFAULT 0
 );
+"""
 
+# Step 2: indexes (created after any missing columns have been added).
+INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_create_time    ON videos(create_time);
+CREATE INDEX IF NOT EXISTS idx_play_count     ON videos(play_count);
+CREATE INDEX IF NOT EXISTS idx_alerted        ON videos(alerted);
+CREATE INDEX IF NOT EXISTS idx_bitable        ON videos(bitable_synced);
 CREATE INDEX IF NOT EXISTS idx_author_status  ON authors(status);
 CREATE INDEX IF NOT EXISTS idx_author_last    ON authors(last_evaluated_at);
 """
+
+# Columns added in later versions that older DBs might be missing.
+MIGRATIONS = {
+    "videos": [
+        ("language",       "TEXT"),
+        ("tier",           "TEXT"),
+        ("bitable_synced", "INTEGER DEFAULT 0"),
+    ],
+    "authors": [],
+}
 
 
 def get_conn() -> sqlite3.Connection:
@@ -68,22 +82,16 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db() -> None:
     with get_conn() as conn:
-        conn.executescript(SCHEMA)
+        # 1) ensure tables exist
+        conn.executescript(TABLES_SQL)
+        # 2) bring old schemas up to date
         _migrate(conn)
+        # 3) finally, indexes (safe now that columns exist)
+        conn.executescript(INDEXES_SQL)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add columns that newer versions of the schema introduced but old
-    databases don't yet have. Safe to run repeatedly."""
-    wanted = {
-        "videos": [
-            ("language",       "TEXT"),
-            ("tier",           "TEXT"),
-            ("bitable_synced", "INTEGER DEFAULT 0"),
-        ],
-        "authors": [],  # created fresh; nothing to migrate
-    }
-    for table, cols in wanted.items():
+    for table, cols in MIGRATIONS.items():
         existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in cols:
             if name not in existing:
@@ -184,8 +192,6 @@ def touch_author_candidate(
     nickname: Optional[str] = None,
     language: Optional[str] = None,
 ) -> None:
-    """Called whenever we encounter an author in a scanned video.
-    Inserts a NEW candidate if we've never seen this author."""
     now = int(time.time())
     with get_conn() as conn:
         conn.execute(
@@ -219,11 +225,7 @@ def update_author_profile(row: dict) -> None:
                 language          = COALESCE(:language, language),
                 status            = :status,
                 reason            = :reason,
-                last_evaluated_at = :now,
-                alerted = CASE
-                    WHEN :status = 'MONITORED' AND alerted = 0 THEN 0
-                    ELSE alerted
-                END
+                last_evaluated_at = :now
             WHERE author_unique = :author_unique
             """,
             {**row, "now": now},
@@ -232,8 +234,6 @@ def update_author_profile(row: dict) -> None:
 
 def fetch_authors_to_evaluate(limit: int, reject_reeval_seconds: int,
                               monitored_refresh_seconds: int) -> list[sqlite3.Row]:
-    """Pick authors to (re)evaluate: new first, then stale monitored,
-    then stale rejected."""
     now = int(time.time())
     with get_conn() as conn:
         return conn.execute(
