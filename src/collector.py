@@ -185,8 +185,13 @@ async def _evaluate_creator(api: TikTokApi, author_unique: str,
 
 # ------------------------- main entry -------------------------
 
-async def run_collection() -> dict:
-    """Run one full collection pass. Returns a summary dict."""
+async def run_collection(mode: str = "fast") -> dict:
+    """Run one collection pass.
+
+    mode='fast' : only primary hashtag scan (videos + cheap author seeds).
+    mode='deep' : discovery hashtag expansion + creator evaluation.
+    Returns a summary dict.
+    """
     ms_token = os.getenv("MS_TOKEN", "").strip()
     if not ms_token:
         raise RuntimeError("MS_TOKEN is required")
@@ -216,6 +221,14 @@ async def run_collection() -> dict:
             tier_total += t_hits
             seed_total += seeds
             await asyncio.sleep(SLEEP_BETWEEN_TAGS)
+
+        if mode == "fast":
+            # Fast mode stops here — notify + bitable happen in main.py.
+            summary = {"mode": mode, "tier_hits": tier_total,
+                       "author_seeds": seed_total,
+                       "creators_accepted": 0, "creators_rejected": 0}
+            logger.info("Collection summary: %s", summary)
+            return summary
 
         # -------- B. Discovery hashtag scan (author seeds only) --------
         logger.info("Phase B: discovery hashtag scan (%d tags)", len(DISCOVERY_HASHTAGS))
@@ -263,6 +276,7 @@ async def run_collection() -> dict:
             await asyncio.sleep(SLEEP_BETWEEN_CREATORS)
 
     summary = {
+        "mode": mode,
         "tier_hits": tier_total,
         "author_seeds": seed_total,
         "creators_accepted": eval_accept,

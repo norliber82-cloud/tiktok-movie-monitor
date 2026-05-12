@@ -1,13 +1,14 @@
-name: Monitor (fast)
+name: Monitor (deep)
 
 on:
   schedule:
-    # Every 45 minutes.
-    - cron: "*/45 * * * *"
+    # Once per hour, at :20 to avoid colliding with the fast cron.
+    - cron: "20 * * * *"
   workflow_dispatch: {}
 
 concurrency:
-  group: monitor-fast
+  # Don't run in parallel with itself, but allow the fast job to run alongside.
+  group: monitor-deep
   cancel-in-progress: false
 
 permissions:
@@ -16,7 +17,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -50,7 +51,7 @@ jobs:
             python -m playwright install --with-deps webkit
           fi
 
-      - name: Run monitor (fast)
+      - name: Run monitor (deep)
         env:
           MS_TOKEN:               ${{ secrets.MS_TOKEN }}
           FEISHU_WEBHOOK:         ${{ secrets.FEISHU_WEBHOOK }}
@@ -61,7 +62,7 @@ jobs:
           BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
           BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
           PYTHONUNBUFFERED: "1"
-        run: python -m src.main --mode fast
+        run: python -m src.main --mode deep
 
       - name: Commit updated DB
         if: always()
@@ -72,9 +73,7 @@ jobs:
           if [[ -f videos.db ]]; then
             git add videos.db
             if ! git diff --cached --quiet; then
-              git commit -m "chore: update videos.db [skip ci]"
+              git commit -m "chore: update videos.db (deep) [skip ci]"
               git push || true
-            else
-              echo "No DB changes."
             fi
           fi

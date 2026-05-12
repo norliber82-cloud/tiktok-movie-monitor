@@ -1,5 +1,13 @@
-"""Entrypoint: collect → notify → sync Bitable."""
+"""Entrypoint. Two modes:
 
+  fast: only Phase A (primary hashtag scan) + notify + Bitable sync.
+        Used by the 45-min cron. Runtime ≈ 6–8 min.
+
+  deep: Phase B (discovery seed) + Phase C (creator eval).
+        Used by a separate hourly cron. Runtime ≈ 10–13 min.
+"""
+
+import argparse
 import asyncio
 import logging
 import sys
@@ -19,35 +27,38 @@ def _setup_logging() -> None:
     )
 
 
-async def _run() -> int:
+async def _run(mode: str) -> int:
     load_dotenv()
     _setup_logging()
     log = logging.getLogger("main")
+    log.info("Starting monitor in mode=%s", mode)
 
     try:
-        summary = await run_collection()
+        summary = await run_collection(mode=mode)
     except Exception as exc:
         log.exception("Collection failed: %s", exc)
-        summary = {"tier_hits": 0, "author_seeds": 0,
-                   "creators_accepted": 0, "creators_rejected": 0}
+        summary = {}
 
     video_pushes = push_new_hits()
-    creator_pushes = push_new_creators()
+    creator_pushes = push_new_creators() if mode == "deep" else 0
 
     video_synced = bitable.sync_videos() if bitable.is_configured() else 0
-    creator_synced = bitable.sync_creators() if bitable.is_configured() else 0
+    creator_synced = bitable.sync_creators() if bitable.is_configured() and mode == "deep" else 0
 
     log.info(
-        "Done. collect=%s | webhook: videos=%d creators=%d | "
+        "Done (mode=%s). collect=%s | webhook: videos=%d creators=%d | "
         "bitable: videos=%d creators=%d (configured=%s)",
-        summary, video_pushes, creator_pushes,
+        mode, summary, video_pushes, creator_pushes,
         video_synced, creator_synced, bitable.is_configured(),
     )
     return 0
 
 
 def main() -> None:
-    raise SystemExit(asyncio.run(_run()))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("fast", "deep"), default="fast")
+    args = parser.parse_args()
+    raise SystemExit(asyncio.run(_run(args.mode)))
 
 
 if __name__ == "__main__":

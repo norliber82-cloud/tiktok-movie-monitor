@@ -88,8 +88,8 @@ CREATOR_MONITORED_REFRESH_DAYS  = 3
 # =========================================================
 PER_TAG_LIMIT           = 150
 PER_DISCOVERY_TAG_LIMIT = 60
-SLEEP_BETWEEN_TAGS      = 6
-SLEEP_BETWEEN_CREATORS  = 8
+SLEEP_BETWEEN_TAGS      = 4
+SLEEP_BETWEEN_CREATORS  = 5
 SESSION_SLEEP_AFTER     = 3
 HEADLESS                = True
 BROWSER                 = "webkit"
