@@ -11,6 +11,7 @@ from TikTokApi import TikTokApi
 from . import db
 from .classifier import is_movie_commentary
 from .config import (
+    BROWSER,
     HASHTAGS,
     HEADLESS,
     MIN_VIEWS,
@@ -108,7 +109,7 @@ async def run_collection() -> list[dict]:
             num_sessions=1,
             sleep_after=SESSION_SLEEP_AFTER,
             headless=HEADLESS,
-            browser="chromium",
+            browser=BROWSER,
         )
 
         for tag in HASHTAGS:

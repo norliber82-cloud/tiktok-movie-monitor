@@ -54,3 +54,6 @@ PER_TAG_LIMIT = 150         # videos to fetch per hashtag per run
 SLEEP_BETWEEN_TAGS = 6      # seconds
 SESSION_SLEEP_AFTER = 3
 HEADLESS = True
+# TikTok-Api supports: "chromium" | "webkit" | "firefox".
+# WebKit is least detected by TikTok's bot check in the wild.
+BROWSER = "webkit"
