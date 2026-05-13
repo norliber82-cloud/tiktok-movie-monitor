@@ -183,6 +183,34 @@ async def _evaluate_creator(api: TikTokApi, author_unique: str,
     return verdict
 
 
+def _evaluate_creator_from_db(author_unique: str, now_ts: int) -> Optional[dict]:
+    """Evaluate a creator using videos we've already collected in our DB.
+    No API calls needed — pure SQLite aggregation."""
+    rows = db.fetch_author_videos(author_unique)
+    if len(rows) < 3:
+        # Not enough data yet; skip (don't reject — we'll try again later
+        # when we've accumulated more of their videos).
+        return None
+
+    sample = []
+    for r in rows:
+        sample.append({
+            "play_count": r["play_count"] or 0,
+            "create_time": r["create_time"] or 0,
+            "caption": r["caption"] or "",
+            "hashtags": (r["hashtags"] or "").split(","),
+        })
+
+    verdict = evaluate_creator(sample, now_ts=now_ts)
+    # Pull nickname/language from the authors table (already stored from seeds)
+    author_info = db.get_author_info(author_unique)
+    verdict["author_unique"] = author_unique
+    verdict["nickname"] = author_info.get("nickname") if author_info else None
+    verdict["follower_count"] = author_info.get("follower_count") if author_info else None
+    verdict["language"] = author_info.get("language") if author_info else None
+    return verdict
+
+
 # ------------------------- main entry -------------------------
 
 async def run_collection(mode: str = "fast") -> dict:
@@ -239,7 +267,7 @@ async def run_collection(mode: str = "fast") -> dict:
             seed_total += seeds
             await asyncio.sleep(SLEEP_BETWEEN_TAGS)
 
-        # -------- C. Creator evaluation (budget-bounded) --------
+        # -------- C. Creator evaluation (from local DB, no API calls) --------
         reject_secs = CREATOR_REJECT_REEVAL_DAYS * 86400
         monitored_secs = CREATOR_MONITORED_REFRESH_DAYS * 86400
         candidates = db.fetch_authors_to_evaluate(
@@ -247,9 +275,9 @@ async def run_collection(mode: str = "fast") -> dict:
             reject_reeval_seconds=reject_secs,
             monitored_refresh_seconds=monitored_secs,
         )
-        logger.info("Phase C: evaluating %d creator candidates", len(candidates))
+        logger.info("Phase C: evaluating %d creator candidates (from local DB)", len(candidates))
         for cand in candidates:
-            verdict = await _evaluate_creator(api, cand["author_unique"], now_ts=now_ts)
+            verdict = _evaluate_creator_from_db(cand["author_unique"], now_ts=now_ts)
             if verdict is None:
                 continue
             db.update_author_profile({
@@ -273,7 +301,6 @@ async def run_collection(mode: str = "fast") -> dict:
                             verdict["vertical_ratio"])
             else:
                 eval_reject += 1
-            await asyncio.sleep(SLEEP_BETWEEN_CREATORS)
 
     summary = {
         "mode": mode,

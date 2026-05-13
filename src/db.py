@@ -316,3 +316,29 @@ def recent_stats() -> dict:
             "SELECT COUNT(*) AS n FROM authors WHERE status = 'MONITORED'"
         ).fetchone()["n"]
     return {"total": total, "alerted": alerted, "monitored": monitored}
+
+
+def fetch_author_videos(author_unique: str, limit: int = 30) -> list[sqlite3.Row]:
+    """Get the most recent videos we've collected for a given author."""
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM videos
+            WHERE author_unique = ?
+            ORDER BY create_time DESC
+            LIMIT ?
+            """,
+            (author_unique, limit),
+        ).fetchall()
+
+
+def get_author_info(author_unique: str) -> Optional[dict]:
+    """Get stored author metadata."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM authors WHERE author_unique = ?",
+            (author_unique,),
+        ).fetchone()
+        if row:
+            return dict(row)
+        return None
