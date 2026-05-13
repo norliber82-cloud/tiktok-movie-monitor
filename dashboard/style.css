@@ -1,0 +1,113 @@
+:root {
+  --bg: #0e0f11;
+  --panel: #16181d;
+  --border: #222730;
+  --fg: #e8eaed;
+  --muted: #8b95a3;
+  --accent: #4f9cf9;
+  --red: #ff4d4f;
+  --orange: #fa8c16;
+  --yellow: #fadb14;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "PingFang SC", sans-serif; }
+
+header {
+  padding: 20px 28px 14px;
+  border-bottom: 1px solid var(--border);
+}
+header h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
+header .meta { color: var(--muted); font-size: 12px; display: flex; gap: 18px; }
+
+nav.tabs {
+  display: flex; gap: 4px;
+  padding: 0 28px; border-bottom: 1px solid var(--border);
+}
+nav.tabs button {
+  background: none; border: none; color: var(--muted);
+  padding: 12px 16px; cursor: pointer; font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+nav.tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+
+.tab { display: none; padding: 18px 28px 60px; }
+.tab.active { display: block; }
+
+.filters {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.filters label { display: flex; flex-direction: column; font-size: 11px;
+  color: var(--muted); gap: 4px; }
+.filters select, .filters input {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 13px; min-width: 140px;
+}
+.filters input { min-width: 200px; }
+.result-count { color: var(--muted); align-self: end; padding-bottom: 6px; margin-left: auto; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: transform .15s, border-color .15s;
+}
+.card:hover { transform: translateY(-2px); border-color: #3a404b; }
+.card .cover { width: 100%; aspect-ratio: 9/16; object-fit: cover;
+  background: #1c1e23; }
+.card .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.card .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { padding: 2px 6px; border-radius: 4px; font-size: 11px;
+  background: #222730; color: var(--fg); }
+.badge.tier-RED    { background: rgba(255,77,79,.2);  color: var(--red); }
+.badge.tier-ORANGE { background: rgba(250,140,22,.2); color: var(--orange); }
+.badge.tier-YELLOW { background: rgba(250,219,20,.25);color: var(--yellow); }
+.card .caption { font-size: 12.5px; line-height: 1.35; color: #cdd3db;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; }
+.card .stats { display: flex; gap: 10px; font-size: 11.5px; color: var(--muted);
+  margin-top: auto; }
+.card .author { font-size: 12px; color: var(--accent); text-decoration: none; }
+.card .author:hover { text-decoration: underline; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 500; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .04em; background: var(--panel); }
+tr:hover td { background: rgba(255,255,255,.02); }
+td a { color: var(--accent); text-decoration: none; }
+td a:hover { text-decoration: underline; }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.stat {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.stat .n { font-size: 26px; font-weight: 600; }
+.stat .label { font-size: 11.5px; color: var(--muted); margin-top: 2px;
+  text-transform: uppercase; letter-spacing: .04em; }
+
+.chart-wrap {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;
+}
+.chart-wrap h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted);
+  font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+
+footer {
+  padding: 14px 28px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 11.5px;
+}

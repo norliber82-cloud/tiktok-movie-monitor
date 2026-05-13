@@ -1,0 +1,53 @@
+name: Dashboard
+
+on:
+  schedule:
+    # Refresh dashboard every 30 min.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+  push:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: dashboard
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install requests
+      - name: Export data from Bitable
+        env:
+          FEISHU_APP_ID:          ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET:      ${{ secrets.FEISHU_APP_SECRET }}
+          BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
+          BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
+          BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
+        run: python scripts/export_dashboard.py
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

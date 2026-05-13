@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Movie Commentary Monitor</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🎬 Movie Commentary Monitor</h1>
+    <div class="meta">
+      <span id="generated-at">loading…</span>
+      <span id="totals"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="videos" class="active">Videos</button>
+    <button data-tab="creators">Creators</button>
+    <button data-tab="stats">Stats</button>
+  </nav>
+
+  <section id="tab-videos" class="tab active">
+    <div class="filters">
+      <label>Platform
+        <select id="f-platform">
+          <option value="">All</option>
+          <option value="tiktok">TikTok</option>
+          <option value="youtube">YouTube</option>
+        </select>
+      </label>
+      <label>Language
+        <select id="f-language">
+          <option value="">All</option>
+          <option value="en">🇺🇸 EN</option>
+          <option value="ja">🇯🇵 JA</option>
+          <option value="zh">🇨🇳 ZH</option>
+        </select>
+      </label>
+      <label>Tier
+        <select id="f-tier">
+          <option value="">All</option>
+          <option value="RED">🔥 RED (1M+)</option>
+          <option value="ORANGE">🟧 ORANGE (500K+)</option>
+          <option value="YELLOW">🟡 YELLOW (200K+)</option>
+        </select>
+      </label>
+      <label>Search
+        <input id="f-q" placeholder="caption / author" />
+      </label>
+      <span class="result-count" id="videos-count"></span>
+    </div>
+    <div class="grid" id="videos-grid"></div>
+  </section>
+
+  <section id="tab-creators" class="tab">
+    <div class="filters">
+      <label>Language
+        <select id="c-language">
+          <option value="">All</option>
+          <option value="en">🇺🇸 EN</option>
+          <option value="ja">🇯🇵 JA</option>
+          <option value="zh">🇨🇳 ZH</option>
+        </select>
+      </label>
+      <label>Search
+        <input id="c-q" placeholder="username" />
+      </label>
+      <span class="result-count" id="creators-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="creators-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Lang</th>
+            <th>Followers</th>
+            <th>Median plays</th>
+            <th>Viral 7d</th>
+            <th>Posts 14d</th>
+            <th>Vertical</th>
+            <th>Evaluated</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-stats" class="tab">
+    <div class="stat-grid" id="stat-grid"></div>
+    <div class="chart-wrap">
+      <h3>Hits over last 7 days</h3>
+      <canvas id="chart-timeline" height="220"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <h3>Tier distribution</h3>
+      <canvas id="chart-tier" height="220"></canvas>
+    </div>
+  </section>
+
+  <footer>
+    <span>Built from Bitable · refreshes every 30 min</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

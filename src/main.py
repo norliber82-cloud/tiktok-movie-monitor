@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from . import bitable
 from .collector import run_collection
 from .notifier import push_new_creators, push_new_hits
+from .yt_collector import run_yt_collection
 
 
 def _setup_logging() -> None:
@@ -38,6 +39,14 @@ async def _run(mode: str) -> int:
     except Exception as exc:
         log.exception("Collection failed: %s", exc)
         summary = {}
+
+    # YouTube Shorts runs synchronously (no playwright / no async needed).
+    # Kept in both modes because yt-dlp is cheap: ~20s per run.
+    try:
+        yt_summary = run_yt_collection()
+        summary = {**summary, **yt_summary}
+    except Exception as exc:
+        log.exception("YT collection failed: %s", exc)
 
     video_pushes = push_new_hits()
     creator_pushes = push_new_creators() if mode == "deep" else 0

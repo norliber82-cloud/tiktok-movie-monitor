@@ -12,6 +12,7 @@ DB_PATH = os.getenv("DB_PATH", "videos.db")
 TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS videos (
     video_id         TEXT PRIMARY KEY,
+    platform         TEXT DEFAULT 'tiktok',
     author_id        TEXT,
     author_unique    TEXT,
     caption          TEXT,
@@ -69,8 +70,11 @@ MIGRATIONS = {
         ("language",       "TEXT"),
         ("tier",           "TEXT"),
         ("bitable_synced", "INTEGER DEFAULT 0"),
+        ("platform",       "TEXT DEFAULT 'tiktok'"),
     ],
-    "authors": [],
+    "authors": [
+        ("platform",       "TEXT DEFAULT 'tiktok'"),
+    ],
 }
 
 
@@ -105,16 +109,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def upsert_video(row: dict) -> None:
     now = int(time.time())
+    row = {**row}
+    row.setdefault("platform", "tiktok")
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO videos (
-                video_id, author_id, author_unique, caption, hashtags,
+                video_id, platform, author_id, author_unique, caption, hashtags,
                 create_time, play_count, like_count, comment_count,
                 share_count, duration, video_url, cover_url, matched_tag,
                 language, tier, first_seen_at, last_checked_at
             ) VALUES (
-                :video_id, :author_id, :author_unique, :caption, :hashtags,
+                :video_id, :platform, :author_id, :author_unique, :caption, :hashtags,
                 :create_time, :play_count, :like_count, :comment_count,
                 :share_count, :duration, :video_url, :cover_url, :matched_tag,
                 :language, :tier, :first_seen_at, :last_checked_at

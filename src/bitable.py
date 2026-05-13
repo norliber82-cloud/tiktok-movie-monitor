@@ -80,6 +80,7 @@ def _headers() -> Optional[dict]:
 #   15 = Link, 17 = Attachment, 1001 = CreatedTime
 VIDEO_FIELDS = [
     ("video_id",       1),
+    ("platform",       3),
     ("tier",           3),
     ("language",       3),
     ("author",         1),
@@ -172,6 +173,7 @@ def _to_ms(ts: Optional[int]) -> Optional[int]:
 def _video_record(row) -> dict:
     return {
         "video_id": str(row["video_id"]),
+        "platform": (row["platform"] or "tiktok") if "platform" in row.keys() else "tiktok",
         "tier": row["tier"] or "",
         "language": row["language"] or "",
         "author": f"@{row['author_unique']}",
