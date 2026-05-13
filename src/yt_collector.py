@@ -1,135 +1,225 @@
-"""YouTube Shorts collector.
+"""YouTube Shorts collector using YouTube Data API v3.
 
-Uses yt-dlp's flat search extraction — no API key required, no auth.
-Filters by duration (<=3 min), posting age, and movie-commentary keywords.
+Uses the search.list endpoint (free, 10k quota/day) to find recent Shorts
+matching movie-commentary queries, then filters by tier/age/keywords.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from yt_dlp import YoutubeDL
+import requests
 
 from . import db
 from .classifier import classify_tier, detect_language, is_movie_commentary
 from .config import (
+    TIERS,
+    WINDOW_DAYS,
     YT_MIN_TIER_VIEWS,
     YT_PER_QUERY_LIMIT,
     YT_SEARCH_QUERIES,
     YT_SHORTS_MAX_DURATION,
-    WINDOW_DAYS,
 )
 
 logger = logging.getLogger(__name__)
 WINDOW_SECONDS = WINDOW_DAYS * 24 * 3600
+API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-_YDL_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "skip_download": True,
-    "extract_flat": False,      # we need view_count, duration, upload_date
-    "ignoreerrors": True,
-    "socket_timeout": 30,
-    "noplaylist": True,
-}
+def _api_key() -> str:
+    return os.getenv("YOUTUBE_API_KEY", "").strip()
 
 
-def _search_shorts(query: str, limit: int) -> list[dict]:
-    """Search YouTube for Shorts. Uses the 'ytsearchdate<N>' pseudo-URL
-    which returns the most recently uploaded matches."""
-    url = f"ytsearchdate{limit}:{query} #shorts"
-    opts = {**_YDL_OPTS, "playlistend": limit, "default_search": "ytsearch"}
+def _iso_to_ts(iso: str) -> int:
+    """Parse ISO 8601 datetime string to unix timestamp."""
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return int(dt.timestamp())
+    except (ValueError, TypeError):
+        return 0
+
+
+def _duration_to_seconds(dur: str) -> int:
+    """Parse ISO 8601 duration like PT1M30S to seconds."""
+    import re
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", dur or "")
+    if not m:
+        return 0
+    h, mi, s = (int(x) if x else 0 for x in m.groups())
+    return h * 3600 + mi * 60 + s
+
+
+def _search_videos(query: str, limit: int, published_after: str) -> list[str]:
+    """Search for video IDs matching query, published after given ISO date."""
+    key = _api_key()
+    if not key:
+        return []
+
+    ids = []
+    page_token = None
+    remaining = limit
+
+    while remaining > 0:
+        params = {
+            "part": "id",
+            "q": query,
+            "type": "video",
+            "videoDuration": "short",  # <=4 min
+            "order": "date",
+            "publishedAfter": published_after,
+            "maxResults": min(remaining, 50),
+            "key": key,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        try:
+            resp = requests.get(f"{API_BASE}/search", params=params, timeout=15)
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("YT search API error for %r: %s", query, exc)
+            break
+
+        if "error" in data:
+            logger.error("YT API error: %s", data["error"].get("message", data["error"]))
+            break
+
+        for item in data.get("items", []):
+            vid_id = item.get("id", {}).get("videoId")
+            if vid_id:
+                ids.append(vid_id)
+
+        page_token = data.get("nextPageToken")
+        remaining -= 50
+        if not page_token:
+            break
+
+    return ids
+
+
+def _get_video_details(video_ids: list[str]) -> list[dict]:
+    """Batch-fetch video details (stats, duration, snippet)."""
+    key = _api_key()
+    if not key or not video_ids:
+        return []
+
     results = []
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-    if not info:
-        return results
-    for entry in (info.get("entries") or []):
-        if entry:
-            results.append(entry)
+    # API allows max 50 IDs per call
+    for i in range(0, len(video_ids), 50):
+        chunk = video_ids[i:i + 50]
+        params = {
+            "part": "snippet,statistics,contentDetails",
+            "id": ",".join(chunk),
+            "key": key,
+        }
+        try:
+            resp = requests.get(f"{API_BASE}/videos", params=params, timeout=15)
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("YT videos API error: %s", exc)
+            continue
+
+        if "error" in data:
+            logger.error("YT API error: %s", data["error"].get("message", data["error"]))
+            continue
+
+        for item in data.get("items", []):
+            results.append(item)
+
     return results
 
 
-def _entry_to_row(entry: dict, query: str, now_ts: int) -> Optional[dict]:
+def _item_to_row(item: dict, query: str, now_ts: int) -> Optional[dict]:
+    """Convert a YouTube API video item to our DB row format."""
     try:
-        vid = entry.get("id") or ""
-        if not vid:
-            return None
-        duration = int(entry.get("duration") or 0)
+        vid_id = item["id"]
+        snippet = item.get("snippet", {})
+        stats = item.get("statistics", {})
+        content = item.get("contentDetails", {})
+
+        duration = _duration_to_seconds(content.get("duration", ""))
         if duration <= 0 or duration > YT_SHORTS_MAX_DURATION:
             return None
 
-        # upload_date is 'YYYYMMDD' in yt-dlp output
-        upload_date = entry.get("upload_date") or ""
-        if len(upload_date) == 8:
-            ts = int(time.mktime(time.strptime(upload_date, "%Y%m%d")))
-        else:
-            ts = int(entry.get("timestamp") or 0)
-        if not ts:
+        create_time = _iso_to_ts(snippet.get("publishedAt", ""))
+        if not create_time or now_ts - create_time > WINDOW_SECONDS:
             return None
 
-        view_count = int(entry.get("view_count") or 0)
-        tier = classify_tier(ts, view_count, now_ts)
+        view_count = int(stats.get("viewCount", 0) or 0)
+        tier = classify_tier(create_time, view_count, now_ts)
         if tier is None or view_count < YT_MIN_TIER_VIEWS:
             return None
 
-        caption = (entry.get("title") or "") + " \n " + (entry.get("description") or "")
-        tags_raw = entry.get("tags") or []
-        tags = [t.strip("# ") for t in tags_raw if isinstance(t, str)]
-        lang = detect_language(entry.get("language", "") or "", caption, tags)
+        title = snippet.get("title", "") or ""
+        description = (snippet.get("description", "") or "")[:500]
+        caption = f"{title}\n{description}"
+        tags = snippet.get("tags") or []
+        lang = detect_language(
+            snippet.get("defaultAudioLanguage", "") or snippet.get("defaultLanguage", "") or "",
+            caption, tags,
+        )
 
         if not is_movie_commentary(caption, tags):
             return None
 
-        uploader = entry.get("uploader_id") or entry.get("channel_id") or ""
-        nickname = entry.get("uploader") or entry.get("channel") or ""
+        channel_id = snippet.get("channelId", "")
+        channel_title = snippet.get("channelTitle", "")
+
         return {
-            "video_id": f"yt:{vid}",
+            "video_id": f"yt:{vid_id}",
             "platform": "youtube",
-            "author_id": entry.get("channel_id", "") or "",
-            "author_unique": uploader,
-            "caption": (entry.get("title") or "")[:500],
-            "hashtags": ",".join(tags),
-            "create_time": ts,
+            "author_id": channel_id,
+            "author_unique": channel_id,
+            "caption": title,
+            "hashtags": ",".join(tags[:20]),
+            "create_time": create_time,
             "play_count": view_count,
-            "like_count": int(entry.get("like_count") or 0),
-            "comment_count": int(entry.get("comment_count") or 0),
+            "like_count": int(stats.get("likeCount", 0) or 0),
+            "comment_count": int(stats.get("commentCount", 0) or 0),
             "share_count": 0,
             "duration": duration,
-            "video_url": f"https://www.youtube.com/shorts/{vid}",
-            "cover_url": entry.get("thumbnail", "") or "",
+            "video_url": f"https://www.youtube.com/shorts/{vid_id}",
+            "cover_url": (snippet.get("thumbnails") or {}).get("high", {}).get("url", ""),
             "matched_tag": query,
             "language": lang,
             "tier": tier,
-            "_nickname": nickname,
+            "_nickname": channel_title,
         }
-    except (TypeError, ValueError) as exc:
-        logger.warning("Could not parse YT entry: %s", exc)
+    except (TypeError, ValueError, KeyError) as exc:
+        logger.warning("Could not parse YT item: %s", exc)
         return None
 
 
 def run_yt_collection() -> dict:
     """Run a single YouTube Shorts collection pass."""
+    key = _api_key()
+    if not key:
+        logger.info("YOUTUBE_API_KEY not set, skipping YouTube collection")
+        return {"yt_tier_hits": 0}
+
     db.init_db()
     now_ts = int(time.time())
-    hits = 0
+    published_after = (
+        datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    for q in YT_SEARCH_QUERIES:
-        try:
-            entries = _search_shorts(q, YT_PER_QUERY_LIMIT)
-        except Exception as exc:
-            logger.exception("YT search failed for %r: %s", q, exc)
+    total_hits = 0
+
+    for query in YT_SEARCH_QUERIES:
+        video_ids = _search_videos(query, YT_PER_QUERY_LIMIT, published_after)
+        if not video_ids:
+            logger.info("YT search %r: 0 results", query)
             continue
 
+        details = _get_video_details(video_ids)
         per_q_hits = 0
-        for e in entries:
-            row = _entry_to_row(e, q, now_ts)
+        for item in details:
+            row = _item_to_row(item, query, now_ts)
             if not row:
-                continue
-            if now_ts - row["create_time"] > WINDOW_SECONDS:
                 continue
             nickname = row.pop("_nickname", None)
             db.upsert_video(row)
@@ -141,9 +231,10 @@ def run_yt_collection() -> dict:
                     language=row["language"],
                 )
             per_q_hits += 1
-            hits += 1
-        logger.info("YT search %r: %d entries, %d tier-hits",
-                    q, len(entries), per_q_hits)
+            total_hits += 1
 
-    logger.info("YT collection total tier-hits: %d", hits)
-    return {"yt_tier_hits": hits}
+        logger.info("YT search %r: %d IDs → %d details → %d tier-hits",
+                    query, len(video_ids), len(details), per_q_hits)
+
+    logger.info("YT collection total tier-hits: %d", total_hits)
+    return {"yt_tier_hits": total_hits}

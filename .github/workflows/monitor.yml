@@ -66,6 +66,7 @@ jobs:
           BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
           BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
           BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
+          YOUTUBE_API_KEY:        ${{ secrets.YOUTUBE_API_KEY }}
           PYTHONUNBUFFERED: "1"
         run: python -m src.main --mode fast
 
