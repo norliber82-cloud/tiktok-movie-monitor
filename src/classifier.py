@@ -132,9 +132,14 @@ def _has_cjk_chinese(s: str) -> bool:
 # ------------------------- creator eligibility -------------------------
 
 def evaluate_creator(videos: list[dict], now_ts: int) -> dict:
-    """Given up to CREATOR_SAMPLE_SIZE recent videos as dicts
-    (keys: play_count, create_time, caption, hashtags),
-    return a dict with computed metrics + status + reason."""
+    """Given recent videos as dicts (keys: play_count, create_time, caption, hashtags),
+    return a dict with computed metrics + status + reason.
+
+    With small samples (1-2 videos), we use relaxed criteria:
+    - Must be movie-commentary (vertical check)
+    - Median plays in the 10K-100K band
+    - At least one video qualifies as "viral" relative to the median
+    """
     if not videos:
         return {
             "status": "REJECTED", "reason": "no_videos",
@@ -161,14 +166,22 @@ def evaluate_creator(videos: list[dict], now_ts: int) -> dict:
     )
     vertical_ratio = vertical_hits / len(videos)
 
-    # Gate checks
+    # Gate checks — relaxed for small samples
     reasons = []
     if not (CREATOR_MEDIAN_MIN <= median_plays <= CREATOR_MEDIAN_MAX):
         reasons.append(f"median_out_of_range({median_plays})")
-    if max_plays_7d < CREATOR_VIRAL_MIN or max_plays_7d < median_plays * CREATOR_VIRAL_MULTIPLIER:
-        reasons.append(f"no_viral_7d(max={max_plays_7d})")
-    if posts_14d < CREATOR_CADENCE_14D_MIN and posts_30d < CREATOR_CADENCE_30D_MIN:
-        reasons.append(f"low_cadence(14d={posts_14d},30d={posts_30d})")
+
+    # For small samples (1-2 videos), skip cadence check and relax viral threshold
+    if len(videos) >= 3:
+        if max_plays_7d < CREATOR_VIRAL_MIN or max_plays_7d < median_plays * CREATOR_VIRAL_MULTIPLIER:
+            reasons.append(f"no_viral_7d(max={max_plays_7d})")
+        if posts_14d < CREATOR_CADENCE_14D_MIN and posts_30d < CREATOR_CADENCE_30D_MIN:
+            reasons.append(f"low_cadence(14d={posts_14d},30d={posts_30d})")
+    else:
+        # Small sample: just check if the video(s) we have show viral potential
+        if max_plays_7d < CREATOR_MEDIAN_MIN * 3:
+            reasons.append(f"no_viral_signal(max={max_plays_7d})")
+
     if vertical_ratio < CREATOR_VERTICAL_RATIO_MIN:
         reasons.append(f"low_vertical({vertical_ratio:.2f})")
 

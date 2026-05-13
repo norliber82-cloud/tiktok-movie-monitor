@@ -187,9 +187,7 @@ def _evaluate_creator_from_db(author_unique: str, now_ts: int) -> Optional[dict]
     """Evaluate a creator using videos we've already collected in our DB.
     No API calls needed — pure SQLite aggregation."""
     rows = db.fetch_author_videos(author_unique)
-    if len(rows) < 3:
-        # Not enough data yet; skip (don't reject — we'll try again later
-        # when we've accumulated more of their videos).
+    if not rows:
         return None
 
     sample = []
