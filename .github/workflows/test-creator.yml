@@ -1,0 +1,45 @@
+name: Test Creator Pipeline
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Restore DB cache
+        uses: actions/cache/restore@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
+          restore-keys: tiktok-db-
+
+      - name: Run test creator script
+        env:
+          MS_TOKEN:               ${{ secrets.MS_TOKEN }}
+          FEISHU_WEBHOOK:         ${{ secrets.FEISHU_WEBHOOK }}
+          FEISHU_APP_ID:          ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET:      ${{ secrets.FEISHU_APP_SECRET }}
+          BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
+          BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
+          BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/test_creator.py
+
+      - name: Save DB cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
