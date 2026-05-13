@@ -2,7 +2,6 @@ name: Monitor (fast)
 
 on:
   schedule:
-    # Every 45 minutes.
     - cron: "*/45 * * * *"
   workflow_dispatch: {}
 
@@ -11,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   scan:
@@ -21,8 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -50,6 +47,15 @@ jobs:
             python -m playwright install --with-deps webkit
           fi
 
+      # Pull the shared DB from cache. All workflows use the same cache key.
+      - name: Restore DB cache
+        uses: actions/cache/restore@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
+          restore-keys: |
+            tiktok-db-
+
       - name: Run monitor (fast)
         env:
           MS_TOKEN:               ${{ secrets.MS_TOKEN }}
@@ -63,20 +69,11 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -m src.main --mode fast
 
-      - name: Commit updated DB
+      # Save the updated DB as a unique cache entry. Next run's restore-keys
+      # prefix match will pick up the most recent one.
+      - name: Save DB cache
         if: always()
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git stash push --include-untracked -- videos.db || true
-          git pull --rebase origin main || true
-          git stash pop || true
-          if [[ -f videos.db ]]; then
-            git add videos.db
-            if ! git diff --cached --quiet; then
-              git commit -m "chore: update videos.db [skip ci]"
-              git push || true
-            else
-              echo "No DB changes."
-            fi
-          fi
+        uses: actions/cache/save@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}

@@ -2,17 +2,15 @@ name: Monitor (deep)
 
 on:
   schedule:
-    # Once per hour, at :20 to avoid colliding with the fast cron.
     - cron: "20 * * * *"
   workflow_dispatch: {}
 
 concurrency:
-  # Don't run in parallel with itself, but allow the fast job to run alongside.
   group: monitor-deep
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   scan:
@@ -22,8 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -51,6 +47,14 @@ jobs:
             python -m playwright install --with-deps webkit
           fi
 
+      - name: Restore DB cache
+        uses: actions/cache/restore@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
+          restore-keys: |
+            tiktok-db-
+
       - name: Run monitor (deep)
         env:
           MS_TOKEN:               ${{ secrets.MS_TOKEN }}
@@ -64,18 +68,9 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -m src.main --mode deep
 
-      - name: Commit updated DB
+      - name: Save DB cache
         if: always()
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git stash push --include-untracked -- videos.db || true
-          git pull --rebase origin main || true
-          git stash pop || true
-          if [[ -f videos.db ]]; then
-            git add videos.db
-            if ! git diff --cached --quiet; then
-              git commit -m "chore: update videos.db (deep) [skip ci]"
-              git push || true
-            fi
-          fi
+        uses: actions/cache/save@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
