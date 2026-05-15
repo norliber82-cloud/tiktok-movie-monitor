@@ -95,7 +95,9 @@ VIDEO_FIELDS = [
     ("发布时间",     5),
     ("入库时间",     5),
     ("视频链接",     15),
+    ("视频URL",      1),
     ("封面链接",     15),
+    ("封面URL",      1),
 ]
 
 CREATOR_FIELDS = [
@@ -191,7 +193,9 @@ def _video_record(row) -> dict:
         "发布时间": _to_ms(row["create_time"]),
         "入库时间": _to_ms(row["first_seen_at"]),
         "视频链接": {"link": row["video_url"], "text": "打开"},
+        "视频URL": row["video_url"] or "",
         "封面链接": {"link": row["cover_url"], "text": "封面"} if row["cover_url"] else None,
+        "封面URL": row["cover_url"] or "",
     }
 
 
