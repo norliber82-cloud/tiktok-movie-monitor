@@ -132,6 +132,17 @@ async def _scan_hashtag(api: TikTokApi, tag: str, limit: int,
                     db.upsert_video(row)
                     if row["tier"] is not None:
                         tier_hits += 1
+                        # Tier-hit author goes straight to MONITORED
+                        # (auto-dedupe via author_unique PRIMARY KEY)
+                        if parsed["author_unique"]:
+                            db.promote_viral_author(
+                                author_unique=parsed["author_unique"],
+                                author_id=parsed["author_id"],
+                                nickname=parsed.get("nickname"),
+                                language=parsed["language"],
+                                play_count=parsed["play_count"],
+                                create_time=parsed["create_time"],
+                            )
     except Exception as exc:
         logger.exception("Error scanning hashtag #%s after %d items: %s", tag, total, exc)
     else:

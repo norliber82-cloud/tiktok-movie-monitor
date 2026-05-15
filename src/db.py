@@ -215,6 +215,62 @@ def touch_author_candidate(
         )
 
 
+def promote_viral_author(
+    author_unique: str,
+    author_id: str,
+    nickname: Optional[str],
+    language: Optional[str],
+    play_count: int,
+    create_time: int,
+) -> None:
+    """When we see a tier-hit video, the author goes straight to MONITORED.
+    This runs alongside touch_author_candidate but with stronger semantics:
+      - Existing REJECTED/NEW author is upgraded to MONITORED
+      - Existing MONITORED author is left alone (already there)
+      - bitable_synced/alerted flags are kept as-is (so dedupe works)
+    """
+    now = int(time.time())
+    reason = f"viral_video(plays={play_count})"
+    with get_conn() as conn:
+        # Insert if missing
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO authors (
+                author_unique, author_id, nickname, language,
+                status, reason, max_plays_7d, last_evaluated_at, first_seen_at
+            ) VALUES (?, ?, ?, ?, 'MONITORED', ?, ?, ?, ?)
+            """,
+            (author_unique, author_id, nickname, language,
+             reason, play_count, now, now),
+        )
+        # Upgrade existing rows that are not yet MONITORED
+        conn.execute(
+            """
+            UPDATE authors SET
+                status            = 'MONITORED',
+                reason            = ?,
+                max_plays_7d      = MAX(COALESCE(max_plays_7d, 0), ?),
+                last_evaluated_at = ?,
+                nickname          = COALESCE(?, nickname),
+                language          = COALESCE(?, language)
+            WHERE author_unique = ?
+              AND status != 'MONITORED'
+            """,
+            (reason, play_count, now, nickname, language, author_unique),
+        )
+        # If already MONITORED, just refresh max_plays_7d if higher
+        conn.execute(
+            """
+            UPDATE authors SET
+                max_plays_7d      = MAX(COALESCE(max_plays_7d, 0), ?),
+                last_evaluated_at = ?
+            WHERE author_unique = ?
+              AND status = 'MONITORED'
+            """,
+            (play_count, now, author_unique),
+        )
+
+
 def update_author_profile(row: dict) -> None:
     now = int(time.time())
     with get_conn() as conn:

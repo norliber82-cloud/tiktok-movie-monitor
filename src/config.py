@@ -16,6 +16,12 @@ HASHTAGS_EN = [
     # Genre-specific (deep recap goldmines)
     "horrormovies", "horrortok", "sciencefiction", "sciencefictionmovies",
     "thrillertok", "netflixmovies",
+    # +20 expansion
+    "actionmovies", "comedymovies", "romcom", "mysterymovies",
+    "crimemovies", "a24films", "marvelstudios", "dcfilms",
+    "netflixoriginal", "moviereaction", "moviefacts",
+    "bestmoviescenes", "moviequotes", "filmnerd",
+    "movieclips", "cinematography", "classicmovies", "indiefilm",
 ]
 
 HASHTAGS_JA = [
@@ -23,6 +29,8 @@ HASHTAGS_JA = [
     "おすすめ映画", "映画の感想",
     "映画好きな人と繋がりたい", "映画部",
     "ホラー映画", "邦画", "洋画",
+    # +2 expansion
+    "アクション映画", "邦画レビュー",
 ]
 
 HASHTAGS_ZH = [
