@@ -1,0 +1,38 @@
+name: Backfill Viral Authors
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore DB cache
+        uses: actions/cache/restore@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
+          restore-keys: tiktok-db-
+
+      - name: Backfill viral authors
+        run: python scripts/backfill_viral_authors.py
+
+      - name: Save DB cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: videos.db
+          key: tiktok-db-${{ github.run_id }}
