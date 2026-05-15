@@ -136,10 +136,11 @@ def _get_field_map(table_id: str) -> dict[str, str]:
 
 
 def _ensure_fields(table_id: str, wanted: list[tuple[str, int]]) -> set[str]:
-    """Create missing fields. Returns set of available field names."""
+    """Create missing fields. Returns set of field names we want to write
+    (i.e. the names from `wanted`), regardless of what else exists in the table."""
     headers = _headers()
     if not headers:
-        return set()
+        return {name for name, _ in wanted}
     app_token = _env("BITABLE_APP_TOKEN")
     existing = set(_get_field_map(table_id).keys())
 
@@ -159,7 +160,9 @@ def _ensure_fields(table_id: str, wanted: list[tuple[str, int]]) -> set[str]:
             existing.add(name)
         else:
             logger.warning("Create field %s rejected: %s", name, data)
-    return existing
+
+    # Always return the wanted field names so the payload filter works correctly
+    return {name for name, _ in wanted}
 
 
 # ------------------------- row conversion -------------------------
