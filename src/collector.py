@@ -100,37 +100,38 @@ async def _scan_hashtag(api: TikTokApi, tag: str, limit: int,
             if not parsed:
                 continue
 
-            if parsed["author_unique"]:
-                # Seed author queue regardless of tier / movie-match.
-                # The author evaluator will filter these later.
-                if is_movie_commentary(parsed["caption"], parsed["tag_list"]):
-                    db.touch_author_candidate(
-                        author_unique=parsed["author_unique"],
-                        author_id=parsed["author_id"],
-                        nickname=parsed.get("nickname"),
-                        language=parsed["language"],
-                    )
-                    seeds += 1
+            is_mc = is_movie_commentary(parsed["caption"], parsed["tag_list"])
 
-            # Discovery pass only seeds authors; does not send alerts.
-            if is_discovery:
-                continue
+            if parsed["author_unique"] and is_mc:
+                db.touch_author_candidate(
+                    author_unique=parsed["author_unique"],
+                    author_id=parsed["author_id"],
+                    nickname=parsed.get("nickname"),
+                    language=parsed["language"],
+                )
+                seeds += 1
 
-            # Posting age outside of the outer window → skip
-            if parsed["create_time"] == 0 or now_ts - parsed["create_time"] > WINDOW_SECONDS:
-                continue
+            # ============================================================
+            # Persist the video to the local DB *if* it's movie-commentary.
+            # This is the data we use for creator evaluation.
+            #   - tier-hit  → store with tier set, will alert + sync Bitable
+            #   - non-tier  → store with tier=None, used only for creator stats
+            # Discovery scans only persist non-tier (no alerts ever).
+            # ============================================================
+            posting_age_ok = (parsed["create_time"] != 0 and
+                              now_ts - parsed["create_time"] <= WINDOW_SECONDS)
 
-            if parsed["tier"] is None:
-                continue
-
-            if not is_movie_commentary(parsed["caption"], parsed["tag_list"]):
-                continue
-
-            # pop helper keys before persisting
-            parsed.pop("tag_list", None)
-            parsed.pop("nickname", None)
-            db.upsert_video(parsed)
-            tier_hits += 1
+            if is_mc and posting_age_ok:
+                row = {k: v for k, v in parsed.items()
+                       if k not in ("tag_list", "nickname")}
+                if is_discovery:
+                    # Always non-tier in discovery mode
+                    row["tier"] = None
+                    db.upsert_video(row)
+                else:
+                    db.upsert_video(row)
+                    if row["tier"] is not None:
+                        tier_hits += 1
     except Exception as exc:
         logger.exception("Error scanning hashtag #%s after %d items: %s", tag, total, exc)
     else:
