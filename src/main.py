@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from . import bitable
 from .collector import run_collection
+from .followers import backfill_followers
 from .notifier import push_new_creators, push_new_hits
 from .yt_collector import run_yt_collection
 
@@ -54,11 +55,19 @@ async def _run(mode: str) -> int:
     video_synced = bitable.sync_videos() if bitable.is_configured() else 0
     creator_synced = bitable.sync_creators() if bitable.is_configured() and mode == "deep" else 0
 
+    # Top up missing follower_count for any creators in the table.
+    # Cheap (~25 records max per run) and degrades gracefully if TikTok blocks.
+    try:
+        followers_filled = backfill_followers()
+    except Exception as exc:
+        log.exception("Follower backfill failed: %s", exc)
+        followers_filled = 0
+
     log.info(
         "Done (mode=%s). collect=%s | webhook: videos=%d creators=%d | "
-        "bitable: videos=%d creators=%d (configured=%s)",
+        "bitable: videos=%d creators=%d | followers_filled=%d (configured=%s)",
         mode, summary, video_pushes, creator_pushes,
-        video_synced, creator_synced, bitable.is_configured(),
+        video_synced, creator_synced, followers_filled, bitable.is_configured(),
     )
     return 0
 

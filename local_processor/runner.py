@@ -161,9 +161,7 @@ def main(lookback_hours: int = 26):
                    if str(r.get("视频ID", "")) not in processed_ids]
     logger.info("Total in window: %d, new to process: %d",
                 len(all_records), len(new_records))
-    new_records = new_records[:config.MAX_VIDEOS_PER_RUN]
-
-    successes, failures = 0, 0
+    new_records = new_records[:config.MAX_VIDEOS_PER_RUN]    successes, failures = 0, 0
     for i, rec in enumerate(new_records, 1):
         vid_id   = str(rec.get("视频ID", "")).strip()
         url      = rec.get("视频链接") or rec.get("video_url") or ""
@@ -260,6 +258,14 @@ def main(lookback_hours: int = 26):
         save_state(state)
 
     logger.info("DONE — successes=%d failures=%d", successes, failures)
+
+    # ---- Step 7: backfill follower_count for any creator without one ----
+    try:
+        from .backfill_followers import main as bf_main
+        logger.info("Running follower backfill...")
+        bf_main(force=False)
+    except Exception as exc:
+        logger.exception("Follower backfill failed: %s", exc)
 
 
 if __name__ == "__main__":
