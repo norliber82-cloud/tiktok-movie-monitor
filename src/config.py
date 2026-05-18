@@ -90,8 +90,8 @@ ALLOWED_LANGUAGES = {"en", "ja"}
 # =========================================================
 TIERS = [
     ("RED",    "🔥 1M+ · within 3d",    "red",    1_000_000, 72, 1),
-    ("ORANGE", "🟧 500K+ · within 24h", "orange",   500_000, 24, 2),
-    ("YELLOW", "🟡 200K+ · within 12h", "yellow",   200_000, 12, 3),
+    ("ORANGE", "🟧 500K+ · within 48h", "orange",   500_000, 48, 2),
+    ("YELLOW", "🟡 100K+ · within 24h", "yellow",   100_000, 24, 3),
 ]
 
 WINDOW_DAYS = 3
@@ -114,12 +114,12 @@ CREATOR_REJECT_REEVAL_DAYS      = 14
 CREATOR_MONITORED_REFRESH_DAYS  = 3
 
 # =========================================================
-# Duration filter (avoid raw clips <35s and full reposts >600s)
+# Duration filter (avoid raw clips <20s and full reposts >600s)
 # =========================================================
-MIN_DURATION_SECONDS = 35
+MIN_DURATION_SECONDS = 20
 MAX_DURATION_SECONDS = 600
-PER_TAG_LIMIT           = 120
-PER_DISCOVERY_TAG_LIMIT = 50
+PER_TAG_LIMIT           = 200
+PER_DISCOVERY_TAG_LIMIT = 80
 SLEEP_BETWEEN_TAGS      = 3
 SLEEP_BETWEEN_CREATORS  = 5
 SESSION_SLEEP_AFTER     = 3
@@ -140,4 +140,4 @@ YT_SEARCH_QUERIES = [
 ]
 YT_PER_QUERY_LIMIT = 40
 YT_SHORTS_MAX_DURATION = 180  # seconds; anything longer is a full video
-YT_MIN_TIER_VIEWS = 200_000   # YouTube Shorts tier floor (uses same TIERS above)
+YT_MIN_TIER_VIEWS = 100_000   # YouTube Shorts tier floor (uses same TIERS above)

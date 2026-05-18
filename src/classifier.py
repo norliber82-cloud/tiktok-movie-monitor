@@ -53,7 +53,7 @@ def is_movie_commentary(caption: str, hashtags: list[str]) -> bool:
 
     # Layer 2: content quality — must have meaningful text beyond hashtags
     text_only = re.sub(r'#\S+', '', caption or '').strip()
-    if len(text_only) < 10:
+    if len(text_only) < 5:
         return False
 
     # Layer 3: anti-clip patterns (raw footage / full movie repost / series parts)
