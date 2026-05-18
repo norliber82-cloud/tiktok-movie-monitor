@@ -110,9 +110,13 @@ def _fetch_creators_needing_backfill(limit: int) -> list[tuple[str, str]]:
             f = rec.get("fields", {})
             username = f.get("用户名")
             followers = f.get("粉丝数")
+            avatar = f.get("头像")
             if not username:
                 continue
-            if not followers or followers in (0, "0", ""):
+            # Need backfill if follower_count is empty OR avatar is empty
+            needs_followers = not followers or followers in (0, "0", "")
+            needs_avatar = not avatar
+            if needs_followers or needs_avatar:
                 targets.append((rec["record_id"], username))
                 if len(targets) >= limit:
                     return targets
@@ -135,6 +139,28 @@ def _update_creator(record_id: str, fields: dict) -> bool:
         logger.warning("update_record exception: %s", exc)
         return False
     return r.get("code") == 0
+
+
+def _ensure_field(name: str, ftype: int) -> None:
+    """Create a field on the creators table if it doesn't exist yet."""
+    headers = _headers()
+    if not headers:
+        return
+    table_id = _env("BITABLE_CREATORS_TABLE")
+    url = f"{API}/bitable/v1/apps/{_env('BITABLE_APP_TOKEN')}/tables/{table_id}/fields"
+    # Check existing
+    try:
+        r = requests.get(url, headers=headers, params={"page_size": 100}, timeout=15).json()
+        existing = {f["field_name"] for f in r.get("data", {}).get("items", [])}
+    except Exception:
+        return
+    if name in existing:
+        return
+    try:
+        requests.post(url, headers=headers,
+                      json={"field_name": name, "type": ftype}, timeout=15)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -174,6 +200,7 @@ def _fetch_user_stats(username: str) -> dict | None:
         "follower_count": int(stats.get("followerCount") or 0),
         "video_count":    int(stats.get("videoCount") or 0),
         "nickname":       user.get("nickname") or "",
+        "avatar_url":     user.get("avatarLarger") or user.get("avatarMedium") or "",
     }
 
 
@@ -187,6 +214,9 @@ def backfill_followers() -> int:
     if not is_configured():
         logger.info("Bitable not configured — skipping follower backfill")
         return 0
+
+    # Ensure the 头像 field exists (type=1 = text)
+    _ensure_field("头像", 1)
 
     targets = _fetch_creators_needing_backfill(MAX_PER_RUN)
     if not targets:
@@ -204,6 +234,8 @@ def backfill_followers() -> int:
         update = {"粉丝数": stats["follower_count"]}
         if stats["nickname"]:
             update["昵称"] = stats["nickname"]
+        if stats.get("avatar_url"):
+            update["头像"] = stats["avatar_url"]
         if _update_creator(rid, update):
             logger.info("[%d/%d] OK @%s — %s followers",
                         i, len(targets), username,
