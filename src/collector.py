@@ -16,6 +16,7 @@ from .classifier import (
     is_movie_commentary,
 )
 from .config import (
+    ALLOWED_LANGUAGES,
     BROWSER,
     CREATORS_EVAL_BUDGET_PER_RUN,
     CREATOR_MONITORED_REFRESH_DAYS,
@@ -122,6 +123,10 @@ async def _scan_hashtag(api: TikTokApi, tag: str, limit: int,
                               now_ts - parsed["create_time"] <= WINDOW_SECONDS)
 
             if is_mc and posting_age_ok:
+                # Language filter: only keep en/ja
+                if parsed["language"] not in ALLOWED_LANGUAGES:
+                    continue
+
                 row = {k: v for k, v in parsed.items()
                        if k not in ("tag_list", "nickname")}
                 if is_discovery:

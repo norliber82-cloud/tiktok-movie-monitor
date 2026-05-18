@@ -25,12 +25,19 @@ HASHTAGS_EN = [
 ]
 
 HASHTAGS_JA = [
-    "映画紹介", "映画考察", "映画解説", "映画レビュー",
-    "おすすめ映画", "映画の感想",
-    "映画好きな人と繋がりたい", "映画部",
-    "ホラー映画", "邦画", "洋画",
-    # +2 expansion
+    # Core commentary
+    "映画紹介", "映画考察", "映画解説", "映画レビュー", "映画の感想",
+    "映画感想", "映画感想垢",
+    # Lists / recs
+    "おすすめ映画", "おすすめ映画教えて", "映画好きな人と繋がりたい",
+    "映画好き", "映画好きと繋がりたい",
+    # Community
+    "映画部", "映画オタク", "映画館", "映画ニュース",
+    # Genre
+    "ホラー映画", "ホラー映画好き", "邦画", "洋画", "恋愛映画",
     "アクション映画", "邦画レビュー",
+    # Streaming-specific (very active in JP)
+    "Netflix映画", "アマプラ", "Amazonプライム",
 ]
 
 HASHTAGS_ZH = [
@@ -74,7 +81,11 @@ KEYWORDS_OUT = [
 ]
 
 # =========================================================
-# Video tier definitions  (strict → lenient)
+# Language filter
+# =========================================================
+# Only persist videos in these languages. Hits in other languages are
+# completely dropped (not stored, not pushed, not synced).
+ALLOWED_LANGUAGES = {"en", "ja"}
 #   (code, label, header_color, min_views, max_age_hours, rank)
 # =========================================================
 TIERS = [

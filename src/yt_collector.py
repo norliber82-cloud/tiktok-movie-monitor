@@ -17,6 +17,7 @@ import requests
 from . import db
 from .classifier import classify_tier, detect_language, is_movie_commentary
 from .config import (
+    ALLOWED_LANGUAGES,
     TIERS,
     WINDOW_DAYS,
     YT_MIN_TIER_VIEWS,
@@ -164,6 +165,10 @@ def _item_to_row(item: dict, query: str, now_ts: int) -> Optional[dict]:
         )
 
         if not is_movie_commentary(caption, tags):
+            return None
+
+        # Language filter
+        if lang not in ALLOWED_LANGUAGES:
             return None
 
         channel_id = snippet.get("channelId", "")
