@@ -25,6 +25,8 @@ from .config import (
     DISCOVERY_HASHTAGS,
     HASHTAGS,
     HEADLESS,
+    MAX_DURATION_SECONDS,
+    MIN_DURATION_SECONDS,
     PER_DISCOVERY_TAG_LIMIT,
     PER_TAG_LIMIT,
     SESSION_SLEEP_AFTER,
@@ -125,6 +127,11 @@ async def _scan_hashtag(api: TikTokApi, tag: str, limit: int,
             if is_mc and posting_age_ok:
                 # Language filter: only keep en/ja
                 if parsed["language"] not in ALLOWED_LANGUAGES:
+                    continue
+
+                # Duration filter: skip raw clips (<35s) and full reposts (>600s)
+                dur = parsed.get("duration") or 0
+                if dur < MIN_DURATION_SECONDS or dur > MAX_DURATION_SECONDS:
                     continue
 
                 row = {k: v for k, v in parsed.items()

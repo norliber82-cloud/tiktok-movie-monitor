@@ -29,15 +29,48 @@ _HASHTAG_WHITELIST = {h.lower() for h in (HASHTAGS + DISCOVERY_HASHTAGS)} | {
 # ------------------------- movie commentary -------------------------
 
 def is_movie_commentary(caption: str, hashtags: list[str]) -> bool:
+    """Classify a video as movie-commentary (vs raw clip / fan edit / repost).
+
+    Three-layer filter:
+      1. Keyword/hashtag match (existing)
+      2. Content quality: caption must have real text beyond just hashtags
+      3. Anti-clip: exclude known raw-footage / repost patterns
+    """
+    import re
+
     cap_lower = f" {(caption or '').lower()} "
+
+    # Layer 0: hard exclusions
     if any(bad in cap_lower for bad in KEYWORDS_OUT):
         return False
-    if any(good in cap_lower for good in KEYWORDS_IN):
-        return True
+
+    # Layer 1: must match at least one inclusion signal
+    has_keyword = any(good in cap_lower for good in KEYWORDS_IN)
     tag_set = {t.lower() for t in (hashtags or [])}
-    if tag_set & _HASHTAG_WHITELIST:
-        return True
-    return False
+    has_tag = bool(tag_set & _HASHTAG_WHITELIST)
+    if not has_keyword and not has_tag:
+        return False
+
+    # Layer 2: content quality — must have meaningful text beyond hashtags
+    text_only = re.sub(r'#\S+', '', caption or '').strip()
+    if len(text_only) < 10:
+        return False
+
+    # Layer 3: anti-clip patterns (raw footage / full movie repost / series parts)
+    _CLIP_PATTERNS = [
+        "full movie", "full film", "full episode",
+        "clip from", "scene from", "original scene",
+        "part1", "part 1", "part2", "part 2", "part3", "part 3",
+        "part4", "part 4", "part5", "part 5", "part6", "part 6",
+        "ep1", "ep 1", "ep2", "ep 2", "ep3", "ep 3",
+        "episode 1", "episode 2", "episode 3",
+        "no commentary", "no narration",
+        "watch till the end",
+    ]
+    if any(p in cap_lower for p in _CLIP_PATTERNS):
+        return False
+
+    return True
 
 
 # ------------------------- tier detection -------------------------

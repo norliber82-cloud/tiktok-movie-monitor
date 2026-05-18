@@ -114,8 +114,10 @@ CREATOR_REJECT_REEVAL_DAYS      = 14
 CREATOR_MONITORED_REFRESH_DAYS  = 3
 
 # =========================================================
-# Scraping behaviour (TikTok)
+# Duration filter (avoid raw clips <35s and full reposts >600s)
 # =========================================================
+MIN_DURATION_SECONDS = 35
+MAX_DURATION_SECONDS = 600
 PER_TAG_LIMIT           = 120
 PER_DISCOVERY_TAG_LIMIT = 50
 SLEEP_BETWEEN_TAGS      = 3
