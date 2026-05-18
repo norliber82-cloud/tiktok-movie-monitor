@@ -110,15 +110,19 @@ def _build_video_card(row) -> dict:
 
 def _build_creator_card(row) -> dict:
     lang_tag = _LANG_FLAG.get(row["language"] or "", row["language"] or "??")
+    median_plays = row["median_plays"] or 0
+    max_plays_7d = row["max_plays_7d"] or 0
+    posts_14d    = row["posts_14d"] or 0
+    posts_30d    = row["posts_30d"] or 0
     fields = [
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**📊 中位播放**\n{row['median_plays']:,}"}},
+            "content": f"**📊 中位播放**\n{median_plays:,}"}},
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**🚀 7日最大**\n{row['max_plays_7d']:,}"}},
+            "content": f"**🚀 7日最大**\n{max_plays_7d:,}"}},
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**🗓️ 14d 发帖**\n{row['posts_14d']}"}},
+            "content": f"**🗓️ 14d 发帖**\n{posts_14d}"}},
         {"is_short": True, "text": {"tag": "lark_md",
-            "content": f"**🗓️ 30d 发帖**\n{row['posts_30d']}"}},
+            "content": f"**🗓️ 30d 发帖**\n{posts_30d}"}},
         {"is_short": True, "text": {"tag": "lark_md",
             "content": f"**🎯 垂直度**\n{(row['vertical_ratio'] or 0) * 100:.0f}%"}},
         {"is_short": True, "text": {"tag": "lark_md",
