@@ -262,11 +262,23 @@ def sync_videos() -> int:
         return 0
 
     allowed = _ensure_fields(table_id, VIDEO_FIELDS)
-    records = [_video_record(r) for r in rows]
+    # Pre-check Bitable for IDs already present (defense against cache loss)
+    existing_ids = _fetch_existing_field_values(table_id, "视频ID")
+    new_rows = [r for r in rows if str(r["video_id"]) not in existing_ids]
+
+    skipped = len(rows) - len(new_rows)
+    if skipped:
+        # Mark the skipped rows as synced so we don't re-check them next run
+        db.mark_videos_synced([r["video_id"] for r in rows
+                               if str(r["video_id"]) in existing_ids])
+        logger.info("Bitable videos: skipped %d already-present", skipped)
+
+    records = [_video_record(r) for r in new_rows]
     created = _batch_create(table_id, records, allowed)
     if created:
-        db.mark_videos_synced([r["video_id"] for r in rows[:created]])
-    logger.info("Bitable videos synced: %d / %d", created, len(rows))
+        db.mark_videos_synced([r["video_id"] for r in new_rows[:created]])
+    logger.info("Bitable videos synced: %d / %d (skipped %d dup)",
+                created, len(new_rows), skipped)
     return created
 
 
@@ -282,9 +294,51 @@ def sync_creators() -> int:
         return 0
 
     allowed = _ensure_fields(table_id, CREATOR_FIELDS)
-    records = [_creator_record(r) for r in rows]
+    existing_users = _fetch_existing_field_values(table_id, "用户名")
+    new_rows = [r for r in rows if r["author_unique"] not in existing_users]
+
+    skipped = len(rows) - len(new_rows)
+    if skipped:
+        db.mark_authors_synced([r["author_unique"] for r in rows
+                                if r["author_unique"] in existing_users])
+        logger.info("Bitable creators: skipped %d already-present", skipped)
+
+    records = [_creator_record(r) for r in new_rows]
     created = _batch_create(table_id, records, allowed)
     if created:
-        db.mark_authors_synced([r["author_unique"] for r in rows[:created]])
-    logger.info("Bitable creators synced: %d / %d", created, len(rows))
+        db.mark_authors_synced([r["author_unique"] for r in new_rows[:created]])
+    logger.info("Bitable creators synced: %d / %d (skipped %d dup)",
+                created, len(new_rows), skipped)
     return created
+
+
+def _fetch_existing_field_values(table_id: str, field_name: str) -> set[str]:
+    """Return the set of already-present values for a single field, used for
+    pre-write dedupe. Cheap (just one paginated GET)."""
+    headers = _headers()
+    if not headers:
+        return set()
+    app_token = _env("BITABLE_APP_TOKEN")
+    url = f"{API_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+    out = set()
+    page_token = None
+    for _ in range(40):
+        params = {"page_size": 500}
+        if page_token:
+            params["page_token"] = page_token
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30).json()
+        except Exception as exc:
+            logger.warning("dedupe pre-fetch failed: %s", exc)
+            break
+        if resp.get("code") != 0:
+            break
+        d = resp.get("data", {})
+        for rec in d.get("items", []):
+            v = rec.get("fields", {}).get(field_name)
+            if v:
+                out.add(str(v))
+        page_token = d.get("page_token")
+        if not d.get("has_more"):
+            break
+    return out
