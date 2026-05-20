@@ -45,7 +45,7 @@ HASHTAGS_ZH = [
 ]
 
 # Primary scan pool — drives tier RED/ORANGE/YELLOW video alerts.
-HASHTAGS = HASHTAGS_EN + HASHTAGS_JA
+HASHTAGS = HASHTAGS_EN
 
 # Mid-volume pool used mainly to seed the creator-discovery queue.
 DISCOVERY_HASHTAGS = [
@@ -85,7 +85,7 @@ KEYWORDS_OUT = [
 # =========================================================
 # Only persist videos in these languages. Hits in other languages are
 # completely dropped (not stored, not pushed, not synced).
-ALLOWED_LANGUAGES = {"en", "ja"}
+ALLOWED_LANGUAGES = {"en"}
 #   (code, label, header_color, min_views, max_age_hours, rank)
 # =========================================================
 TIERS = [
