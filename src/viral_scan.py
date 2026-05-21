@@ -28,6 +28,7 @@ load_dotenv()
 import requests as _requests
 
 from . import bitable as _b
+from .comments import extract_title_from_comments, fetch_comments_for_video
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,7 @@ def _write_viral(viral_rows: list[dict]) -> int:
             "语言":       "",
             "作者":       f"@{u}",
             "标题":       (r.get("caption") or "")[:2000],
+            "原片名":     r.get("source_title") or "",
             "播放量":     r.get("play_count") or 0,
             "点赞数":     r.get("like_count") or 0,
             "评论数":     r.get("comment_count") or 0,
@@ -281,6 +283,37 @@ def _write_liked(liked_vids: list[dict], region: str) -> int:
                    for u in unique_authors]
         bitable_io.write_creators(minimal, f"liked_{region}")
     return written
+
+
+async def _fetch_titles_for_videos(videos: list[dict],
+                                   ms_token: str) -> dict[str, str]:
+    """Fetch comments for a batch of videos and extract movie titles.
+    Returns {video_id: title_string}."""
+    from TikTokApi import TikTokApi
+
+    titles: dict[str, str] = {}
+    async with TikTokApi() as api:
+        await api.create_sessions(
+            ms_tokens=[ms_token],
+            num_sessions=1,
+            sleep_after=3,
+            headless=True,
+            browser="webkit",
+            enable_session_recovery=True,
+        )
+        for v in videos:
+            vid_id = v.get("video_id", "")
+            author = v.get("author_unique", "")
+            if not vid_id:
+                continue
+            comments = await fetch_comments_for_video(
+                api, vid_id, count=20, author_unique=author)
+            title = extract_title_from_comments(comments, author_unique=author)
+            if title:
+                titles[vid_id] = title
+                logger.info("    %s → %s", vid_id, title)
+            await asyncio.sleep(1.0)
+    return titles
 
 
 # ============================================================
@@ -333,6 +366,15 @@ def main():
     logger.info("Found %d viral videos (>=%dM in %dd)",
                 len(viral), VIRAL_MIN_PLAYS // 1_000_000, VIRAL_WINDOW_DAYS)
 
+    # 3b. Fetch comments for viral hits to extract original movie title
+    if viral:
+        logger.info("Fetching comments for %d viral videos…", len(viral))
+        titles = asyncio.run(_fetch_titles_for_videos(viral, ms_token))
+        for v in viral:
+            v["source_title"] = titles.get(v["video_id"], "")
+        titled = sum(1 for v in viral if v.get("source_title"))
+        logger.info("Extracted titles for %d/%d viral videos", titled, len(viral))
+
     # 4. Write viral hits
     if viral:
         _write_viral(viral)
@@ -347,6 +389,14 @@ def main():
         logger.info("Liked @%s: %d total, %d within %d days",
                     username, len(vids), len(recent), LIKED_MAX_AGE_DAYS)
         if recent:
+            # Fetch comments for liked videos to extract titles
+            logger.info("  Fetching comments for %d liked videos…", len(recent))
+            titles = asyncio.run(_fetch_titles_for_videos(recent, ms_token))
+            for v in recent:
+                v["source_title"] = titles.get(v["video_id"], "")
+            titled = sum(1 for v in recent if v.get("source_title"))
+            logger.info("  Extracted titles for %d/%d liked videos", titled, len(recent))
+
             written = _write_liked(recent, region)
             logger.info("  @%s: %d written", username, written)
 
