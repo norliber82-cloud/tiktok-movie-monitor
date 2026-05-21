@@ -1,0 +1,58 @@
+name: Viral Scan (following creators)
+
+on:
+  schedule:
+    - cron: "30 */3 * * *"   # every 3 hours at :30
+  workflow_dispatch: {}
+
+concurrency:
+  group: viral-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-webkit-1.49.0
+
+      - name: Install Playwright WebKit
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            python -m playwright install-deps webkit
+          else
+            python -m playwright install --with-deps webkit
+          fi
+
+      - name: Run viral scan
+        env:
+          MS_TOKEN:               ${{ secrets.MS_TOKEN }}
+          FEISHU_APP_ID:          ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET:      ${{ secrets.FEISHU_APP_SECRET }}
+          BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
+          BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m src.viral_scan

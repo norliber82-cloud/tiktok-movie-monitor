@@ -82,6 +82,7 @@ VIDEO_FIELDS = [
     ("视频ID",       1),
     ("平台",         3),
     ("等级",         3),
+    ("可信度",       3),
     ("语言",         3),
     ("作者",         1),
     ("标题",         1),
@@ -112,6 +113,7 @@ CREATOR_FIELDS = [
     ("垂直度",       2),
     ("判定原因",     1),
     ("评估时间",     5),
+    ("主页URL",      1),
     ("主页链接",     15),
 ]
 
@@ -180,6 +182,7 @@ def _video_record(row) -> dict:
         "视频ID": str(row["video_id"]),
         "平台": (row["platform"] or "tiktok") if "platform" in row.keys() else "tiktok",
         "等级": row["tier"] or "",
+        "可信度": row.get("confidence") or "",
         "语言": row["language"] or "",
         "作者": f"@{row['author_unique']}",
         "标题": (row["caption"] or "")[:2000],
@@ -200,6 +203,7 @@ def _video_record(row) -> dict:
 
 
 def _creator_record(row) -> dict:
+    profile_url = f"https://www.tiktok.com/@{row['author_unique']}"
     return {
         "用户名": row["author_unique"],
         "昵称": row["nickname"] or "",
@@ -212,8 +216,8 @@ def _creator_record(row) -> dict:
         "垂直度": float(row["vertical_ratio"] or 0),
         "判定原因": row["reason"] or "",
         "评估时间": _to_ms(row["last_evaluated_at"]),
-        "主页链接": {"link": f"https://www.tiktok.com/@{row['author_unique']}",
-                    "text": "主页"},
+        "主页URL": profile_url,
+        "主页链接": {"link": profile_url, "text": "主页"},
     }
 
 

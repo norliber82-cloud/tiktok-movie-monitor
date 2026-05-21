@@ -71,6 +71,7 @@ MIGRATIONS = {
         ("tier",           "TEXT"),
         ("bitable_synced", "INTEGER DEFAULT 0"),
         ("platform",       "TEXT DEFAULT 'tiktok'"),
+        ("confidence",     "TEXT"),
     ],
     "authors": [
         ("platform",       "TEXT DEFAULT 'tiktok'"),

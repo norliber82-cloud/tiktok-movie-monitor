@@ -15,6 +15,7 @@ from .classifier import (
     evaluate_creator,
     is_movie_commentary,
 )
+from .confidence import score as confidence_score
 from .config import (
     ALLOWED_LANGUAGES,
     BROWSER,
@@ -136,6 +137,8 @@ async def _scan_hashtag(api: TikTokApi, tag: str, limit: int,
 
                 row = {k: v for k, v in parsed.items()
                        if k not in ("tag_list", "nickname")}
+                row["confidence"] = confidence_score(
+                    parsed["author_unique"], parsed["caption"])
                 if is_discovery:
                     # Always non-tier in discovery mode
                     row["tier"] = None
