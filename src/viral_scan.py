@@ -1,5 +1,7 @@
 """Viral scan: pull recent videos from followed creators and flag 1M+ in 3d.
 
+Also pulls the user's public liked videos via TikTokApi (Playwright).
+
 Designed to run on GitHub Actions (clean IP, no cookie needed).
 Reads the creator list from the Feishu Bitable `following_creators` table,
 then uses TikTokApi (Playwright) to pull each creator's recent videos.
@@ -36,9 +38,17 @@ API = "https://open.feishu.cn/open-apis"
 # ============================================================
 
 FOLLOWING_CREATORS_TABLE = "tblRc6b9FrxMu4Gv"
+LIKED_VIDEOS_TABLE      = "tblzY8kdXrffenE9"
 VIRAL_MIN_PLAYS = 1_000_000
 VIRAL_WINDOW_DAYS = 3
 VIDEOS_PER_CREATOR = 30
+
+# Accounts whose public liked-videos we pull
+LIKED_ACCOUNTS = [
+    "powerfuljourney",   # US
+    "kariasxshf9",       # JP
+]
+LIKED_MAX_AGE_DAYS = 7
 
 
 # ============================================================
@@ -125,6 +135,54 @@ async def _pull_videos(usernames: list[str], ms_token: str,
             except Exception as exc:
                 logger.warning("  @%s failed: %s", u, exc)
                 results[u] = []
+            await asyncio.sleep(2.0)
+    return results
+
+
+async def _pull_liked_videos(usernames: list[str],
+                             ms_token: str) -> dict[str, list[dict]]:
+    """Pull public liked videos for each account via TikTokApi."""
+    from TikTokApi import TikTokApi
+
+    results: dict[str, list[dict]] = {}
+    async with TikTokApi() as api:
+        await api.create_sessions(
+            ms_tokens=[ms_token],
+            num_sessions=1,
+            sleep_after=3,
+            headless=True,
+            browser="webkit",
+        )
+        for username in usernames:
+            try:
+                user = api.user(username=username)
+                vids = []
+                async for v in user.liked(count=200):
+                    vd = v.as_dict
+                    a = vd.get("author", {}) or {}
+                    s = vd.get("stats", {}) or {}
+                    vid_obj = vd.get("video", {}) or {}
+                    vid_id = str(vd.get("id", ""))
+                    uniq = a.get("uniqueId") or ""
+                    vids.append({
+                        "video_id":      vid_id,
+                        "author_unique": uniq,
+                        "nickname":      a.get("nickname") or "",
+                        "caption":       vd.get("desc", "") or "",
+                        "create_time":   int(vd.get("createTime", 0)),
+                        "play_count":    int(s.get("playCount") or 0),
+                        "like_count":    int(s.get("diggCount") or 0),
+                        "comment_count": int(s.get("commentCount") or 0),
+                        "share_count":   int(s.get("shareCount") or 0),
+                        "duration":      int(vid_obj.get("duration", 0) or 0),
+                        "video_url":     f"https://www.tiktok.com/@{uniq}/video/{vid_id}",
+                        "cover_url":     vid_obj.get("cover", "") or "",
+                    })
+                results[username] = vids
+                logger.info("  @%s liked: %d videos", username, len(vids))
+            except Exception as exc:
+                logger.warning("  @%s liked failed: %s", username, exc)
+                results[username] = []
             await asyncio.sleep(2.0)
     return results
 
@@ -237,6 +295,38 @@ def main():
         _write_viral(viral)
     else:
         logger.info("No viral hits this run")
+
+    # ============================================================
+    # 5. Pull public liked videos from tracked accounts
+    # ============================================================
+    logger.info("--- Pulling liked videos from %d accounts ---", len(LIKED_ACCOUNTS))
+    liked_results = asyncio.run(_pull_liked_videos(LIKED_ACCOUNTS, ms_token))
+
+    now = int(time.time())
+    liked_cutoff = now - LIKED_MAX_AGE_DAYS * 86400
+
+    for username, liked_vids in liked_results.items():
+        region = "us" if username == "powerfuljourney" else "jp"
+        recent = [v for v in liked_vids
+                  if int(v.get("create_time") or 0) >= liked_cutoff]
+        logger.info("  @%s: %d liked total, %d within %d days",
+                    username, len(liked_vids), len(recent), LIKED_MAX_AGE_DAYS)
+        if recent:
+            from local_processor.account_tracker import bitable_io
+            written = bitable_io.write_liked_videos(recent, source_account=region)
+            logger.info("  @%s: %d written to liked_videos table", username, written)
+
+            # Also write authors to creators table
+            unique_authors = {v["author_unique"] for v in recent if v.get("author_unique")}
+            author_details = []
+            for uniq in list(unique_authors)[:80]:
+                # Use TikTokApi to get user info (lightweight)
+                pass  # profile enrichment handled by account-tracker
+            if unique_authors:
+                # Write minimal creator records
+                minimal = [{"unique_id": u, "nickname": "", "follower_count": 0}
+                           for u in unique_authors]
+                bitable_io.write_creators(minimal, f"liked_{region}")
 
 
 if __name__ == "__main__":
