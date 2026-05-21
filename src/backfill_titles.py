@@ -1,20 +1,23 @@
 """Backfill `原片名` for videos already in Feishu Bitable.
 
+Uses Apify's clockworks/tiktok-comments-scraper for reliable comment
+extraction (TikTokApi gets bot-blocked on GitHub Actions).
+
 Reads all records from the videos tables (US + JP + liked_videos),
-filters to those with empty `原片名`, fetches comments via TikTokApi,
+filters to those with empty `原片名`, fetches comments via Apify in batch,
 extracts the title, and updates the record.
 
-Usage (via GitHub Actions or one-off):
+Usage:
     python -m src.backfill_titles
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
 import time
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -23,7 +26,7 @@ load_dotenv()
 import requests as _requests
 
 from . import bitable as _b
-from .comments import extract_title_from_comments, fetch_comments_for_video
+from .comments import extract_titles_via_apify
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +39,10 @@ TABLES = [
     ("liked_videos", "tblzY8kdXrffenE9"),
 ]
 
-# Cap per run so we don't blow up the cost
+# Cap per run: 100 videos * 10 comments = 1000 comments ≈ $1 of Apify credit
 MAX_PER_RUN = 100
-MAX_PER_TABLE = 50
+APIFY_BATCH_SIZE = 25  # videos per Apify call (single sync request)
+COMMENTS_PER_VIDEO = 10
 
 
 def _setup_logging():
@@ -51,7 +55,7 @@ def _setup_logging():
 
 def _list_records_needing_backfill(table_id: str, limit: int = 50
                                    ) -> list[dict]:
-    """Pull records where 原片名 is empty and 视频ID is set."""
+    """Pull records where 原片名 is empty and 视频URL is set."""
     headers = _b._headers()
     if not headers:
         return []
@@ -72,25 +76,21 @@ def _list_records_needing_backfill(table_id: str, limit: int = 50
         d = r.get("data", {})
         for rec in d.get("items", []):
             f = rec.get("fields", {}) or {}
-            video_id = f.get("视频ID")
-            if not video_id:
+            video_url = f.get("视频URL")
+            if isinstance(video_url, list):
+                video_url = video_url[0].get("text") if video_url else None
+            video_url = (video_url or "").strip()
+            if not video_url or "/video/" not in video_url:
                 continue
-            if isinstance(video_id, list):
-                video_id = video_id[0].get("text") if video_id else None
-            video_id = str(video_id) if video_id else ""
-            if not video_id:
-                continue
-            # Skip if 原片名 is already filled
             existing_title = f.get("原片名")
             if existing_title and str(existing_title).strip():
                 continue
-            # Get author for is_author check
             author = f.get("作者") or ""
             if isinstance(author, str):
                 author = author.lstrip("@")
             out.append({
                 "record_id": rec["record_id"],
-                "video_id":  video_id,
+                "video_url": video_url,
                 "author":    author,
             })
             if len(out) >= limit:
@@ -122,90 +122,77 @@ def _batch_update(table_id: str, updates: list[dict]) -> int:
     return written
 
 
-async def _extract_titles_batch(records: list[dict],
-                                ms_token: str) -> list[dict]:
-    """For each record, fetch comments and extract title.
-    Returns list of {record_id, fields: {原片名: title}} for non-empty titles."""
-    from TikTokApi import TikTokApi
+def backfill_table(table_id: str, label: str, budget: int) -> int:
+    """Returns number of records actually backfilled."""
+    logger.info("=== Backfill %s (%s) — budget %d ===", label, table_id, budget)
 
-    updates = []
-    async with TikTokApi() as api:
-        await api.create_sessions(
-            ms_tokens=[ms_token],
-            num_sessions=2,
-            sleep_after=3,
-            headless=True,
-            browser="webkit",
-            enable_session_recovery=True,
-        )
-        for i, rec in enumerate(records):
-            try:
-                comments = await fetch_comments_for_video(
-                    api, rec["video_id"], count=20,
-                    author_unique=rec.get("author", ""),
-                )
-                title = extract_title_from_comments(
-                    comments, author_unique=rec.get("author", ""))
-                if title:
-                    updates.append({
-                        "record_id": rec["record_id"],
-                        "fields": {"原片名": title},
-                    })
-                    logger.info("  [%d/%d] %s → %s",
-                                i + 1, len(records), rec["video_id"], title)
-                else:
-                    logger.debug("  [%d/%d] %s: no title found",
-                                 i + 1, len(records), rec["video_id"])
-            except Exception as exc:
-                logger.debug("  [%d/%d] %s failed: %s",
-                             i + 1, len(records), rec["video_id"], str(exc)[:80])
-            await asyncio.sleep(1.0)
-    return updates
+    records = _list_records_needing_backfill(table_id, limit=budget)
+    logger.info("Found %d records needing backfill", len(records))
+    if not records:
+        return 0
+
+    # Process in Apify batches
+    all_updates = []
+    for i in range(0, len(records), APIFY_BATCH_SIZE):
+        chunk = records[i:i + APIFY_BATCH_SIZE]
+        pairs = [(r["video_url"], r.get("author", "")) for r in chunk]
+        logger.info("  Apify batch %d/%d (%d videos)…",
+                    i // APIFY_BATCH_SIZE + 1,
+                    (len(records) + APIFY_BATCH_SIZE - 1) // APIFY_BATCH_SIZE,
+                    len(chunk))
+        titles = extract_titles_via_apify(pairs,
+                                          comments_per_post=COMMENTS_PER_VIDEO)
+
+        for r in chunk:
+            t = titles.get(r["video_url"])
+            if t:
+                all_updates.append({
+                    "record_id": r["record_id"],
+                    "fields": {"原片名": t},
+                })
+                logger.info("    ✓ %s → %s", r["video_url"][-25:], t)
+
+        # Be polite between Apify calls
+        if i + APIFY_BATCH_SIZE < len(records):
+            time.sleep(2)
+
+    logger.info("Extracted %d titles from %d videos",
+                len(all_updates), len(records))
+
+    if all_updates:
+        written = _batch_update(table_id, all_updates)
+        logger.info("Updated %d records in Bitable", written)
+        return written
+    return 0
 
 
 def main():
     _setup_logging()
     t0 = time.time()
 
-    ms_token = os.getenv("MS_TOKEN", "").strip()
-    if not ms_token:
-        logger.error("MS_TOKEN not set"); sys.exit(1)
+    if not os.getenv("APIFY_API_TOKEN", "").strip():
+        logger.error("APIFY_API_TOKEN not set"); sys.exit(1)
     if not _b.is_configured():
         logger.error("Feishu not configured"); sys.exit(1)
 
-    total_processed = 0
     total_filled = 0
+    remaining = MAX_PER_RUN
 
     for label, table_id in TABLES:
         if not table_id:
             continue
-        if total_processed >= MAX_PER_RUN:
-            logger.info("Reached MAX_PER_RUN (%d), stopping", MAX_PER_RUN)
+        if remaining <= 0:
+            logger.info("Reached MAX_PER_RUN, stopping")
             break
 
-        budget = min(MAX_PER_TABLE, MAX_PER_RUN - total_processed)
-        logger.info("=== Backfill %s (%s) — budget %d ===",
-                    label, table_id, budget)
-
-        records = _list_records_needing_backfill(table_id, limit=budget)
-        logger.info("Found %d records needing backfill", len(records))
-        if not records:
-            continue
-
-        updates = asyncio.run(_extract_titles_batch(records, ms_token))
-        logger.info("Extracted %d titles from %d videos",
-                    len(updates), len(records))
-
-        if updates:
-            written = _batch_update(table_id, updates)
-            logger.info("Updated %d records in Bitable", written)
-            total_filled += written
-
-        total_processed += len(records)
+        budget = min(remaining, 50)  # max 50 per table per run
+        filled = backfill_table(table_id, label, budget)
+        total_filled += filled
+        remaining -= budget  # consume budget regardless of fills
 
     elapsed = time.time() - t0
-    logger.info("=== Backfill done: %d filled / %d processed in %.1f min ===",
-                total_filled, total_processed, elapsed / 60)
+    logger.info("=== Backfill done: %d filled in %.1f min ===",
+                total_filled, elapsed / 60)
 
 
 if __name__ == "__main__":
