@@ -10,23 +10,44 @@ is reused from src.config to keep them in sync.
 # JP slice in the global pool, since this is JP-dedicated.
 # =========================================================
 JP_HASHTAGS = [
-    # Core movie commentary
-    "映画紹介", "映画考察", "映画解説", "映画レビュー", "映画の感想",
-    "映画感想", "映画感想垢", "映画の話", "映画好き同士で繋がろう",
-    # Lists & recs
+    # ========== Tier S: 实测最有效（你点赞数据显示的高频标签） ==========
+    "映画", "映画紹介", "映画解説", "映画鑑賞",
+    "映画ホリック", "映画レビュー",
+
+    # ========== Tier A: Core movie commentary ==========
+    "映画考察", "映画の感想", "映画感想", "映画感想垢",
+    "映画の話", "映画好き同士で繋がろう",
+
+    # ========== Tier A: 中文风格但日语圈在用 ==========
+    "映画介绍", "映画介紹", "映画绍介",  # 海外日本人用得多
+
+    # ========== Tier A: 日语+英语混合（爆款常用） ==========
+    "movietok", "moviereview", "filmbreaker", "japanesemovie",
+    "日本映画", "外道の歌",
+
+    # ========== Tier B: Lists & recs ==========
     "おすすめ映画", "おすすめ映画教えて", "映画好きな人と繋がりたい",
     "映画好き", "映画好きと繋がりたい", "映画好き集まれ",
-    "週末映画", "今日の映画",
-    # Community
+    "週末映画", "今日の映画", "ベスト映画", "名作映画",
+
+    # ========== Tier B: Community ==========
     "映画部", "映画オタク", "映画館", "映画ニュース", "映画クラスタ",
-    # Genre tags (highly active)
+
+    # ========== Tier B: Genre tags ==========
     "ホラー映画", "ホラー映画好き", "ホラー映画好きな人と繋がりたい",
     "アクション映画", "恋愛映画", "コメディ映画", "アニメ映画",
     "邦画", "邦画レビュー", "邦画好き", "洋画", "洋画好き",
-    # Streaming-specific (very high volume)
+    "怪獣", "SF映画", "ミステリー映画", "サスペンス映画",
+
+    # ========== Tier B: Streaming ==========
     "Netflix映画", "ネトフリ", "ネトフリ映画",
     "アマプラ", "Amazonプライム", "アマプラ映画",
-    "Disney+", "ディズニープラス",
+    "Disney+", "ディズニープラス", "ネトフリで観れる",
+
+    # ========== Tier B: Contest / promotional ==========
+    "TikTok映画TVコンテスト", "TikTokFilmTVCompetition",
+    "tiktoktvfilmcontest", "ハイスコアの映画推薦",
+    "映画とテレビの解説は人気があります", "映画とテレビの推薦",
 ]
 
 # Discovery-only pool (for seeding mid-tier creator candidates)
@@ -44,13 +65,15 @@ JP_DISCOVERY_HASHTAGS = [
 JP_ALLOWED_LANGUAGES = {"ja"}
 
 # =========================================================
-# Tier thresholds (slightly lower than US since JP TikTok has
-# smaller absolute view counts; you can tune later)
+# Tier thresholds — calibrated against actual JP liked-video
+# data (median 320K plays, P25 100K, P75 1.3M). Old thresholds
+# were 500K/200K/50K, but real engagement is lower than US so
+# we relax further to surface more candidates.
 # =========================================================
 JP_TIERS = [
-    ("RED",    "🔥🇯🇵 500K+ · 3d",    "red",    500_000, 72, 1),
-    ("ORANGE", "🟧🇯🇵 200K+ · 48h",   "orange", 200_000, 48, 2),
-    ("YELLOW", "🟡🇯🇵 50K+ · 24h",    "yellow",  50_000, 24, 3),
+    ("RED",    "🔥🇯🇵 300K+ · 7d",    "red",    300_000, 168, 1),
+    ("ORANGE", "🟧🇯🇵 100K+ · 5d",   "orange", 100_000, 120, 2),
+    ("YELLOW", "🟡🇯🇵 30K+ · 3d",    "yellow",  30_000,  72, 3),
 ]
 
 # =========================================================
