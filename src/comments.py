@@ -124,16 +124,29 @@ async def fetch_comments_for_video(api, video_id: str, count: int = 20,
     try:
         video = api.video(id=video_id)
         async for comment in video.comments(count=count):
-            cd = comment.as_dict
-            user_info = cd.get("user", {}) or {}
-            commenter = user_info.get("uniqueId") or user_info.get("unique_id") or ""
-            comments.append({
-                "text": cd.get("text", "") or "",
-                "user": commenter,
-                "likes": int(cd.get("digg_count", 0) or 0),
-                "is_author": (commenter.lower() == author_unique.lower()
-                              if author_unique else False),
-            })
+            try:
+                # Use the Comment object's typed properties (more reliable
+                # than digging into as_dict)
+                text = (getattr(comment, "text", "") or "").strip()
+                likes = int(getattr(comment, "likes_count", 0) or 0)
+                # Author is a User object
+                author_obj = getattr(comment, "author", None)
+                commenter = ""
+                if author_obj is not None:
+                    commenter = (getattr(author_obj, "username", "")
+                                 or getattr(author_obj, "user_id", "")
+                                 or "")
+                if not text:
+                    continue
+                comments.append({
+                    "text": text,
+                    "user": commenter,
+                    "likes": likes,
+                    "is_author": (commenter.lower() == author_unique.lower()
+                                  if author_unique and commenter else False),
+                })
+            except Exception:
+                continue
     except Exception as exc:
-        logger.debug("comments for %s failed: %s", video_id, str(exc)[:80])
+        logger.warning("comments for %s failed: %s", video_id, str(exc)[:120])
     return comments
