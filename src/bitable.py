@@ -179,15 +179,24 @@ def _to_ms(ts: Optional[int]) -> Optional[int]:
 
 
 def _video_record(row) -> dict:
+    # sqlite3.Row doesn't have .get(), so guard via try/except
+    try:
+        confidence = row["confidence"] or ""
+    except (IndexError, KeyError):
+        confidence = ""
+    try:
+        source_title = row["source_title"] or ""
+    except (IndexError, KeyError):
+        source_title = ""
     return {
         "视频ID": str(row["video_id"]),
         "平台": (row["platform"] or "tiktok") if "platform" in row.keys() else "tiktok",
         "等级": row["tier"] or "",
-        "可信度": row.get("confidence") or "",
+        "可信度": confidence,
         "语言": row["language"] or "",
         "作者": f"@{row['author_unique']}",
         "标题": (row["caption"] or "")[:2000],
-        "原片名": row.get("source_title") or "",
+        "原片名": source_title,
         "播放量": row["play_count"] or 0,
         "点赞数": row["like_count"] or 0,
         "评论数": row["comment_count"] or 0,
