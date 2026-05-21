@@ -50,6 +50,11 @@ LIKED_ACCOUNTS = [
 ]
 LIKED_MAX_AGE_DAYS = 7
 
+# TikTokApi session config — tuned for reliability
+NUM_SESSIONS = 3
+SLEEP_AFTER_SESSION = 5
+PER_USER_TIMEOUT = 15  # seconds max per user before giving up
+
 
 # ============================================================
 # Feishu: read creator usernames from the table
@@ -90,101 +95,119 @@ def _fetch_creator_usernames() -> list[str]:
 
 
 # ============================================================
-# TikTokApi: pull videos
+# Video shape helper
 # ============================================================
 
-async def _pull_videos(usernames: list[str], ms_token: str,
-                       count: int) -> dict[str, list[dict]]:
+def _shape_video(vd: dict, fallback_author: str = "") -> Optional[dict]:
+    """Parse a TikTokApi video dict into our standard shape."""
+    try:
+        a = vd.get("author", {}) or {}
+        s = vd.get("stats", {}) or {}
+        vid_obj = vd.get("video", {}) or {}
+        vid_id = str(vd.get("id", ""))
+        if not vid_id:
+            return None
+        uniq = a.get("uniqueId") or fallback_author
+        return {
+            "video_id":      vid_id,
+            "author_unique": uniq,
+            "nickname":      a.get("nickname") or "",
+            "caption":       vd.get("desc", "") or "",
+            "create_time":   int(vd.get("createTime", 0)),
+            "play_count":    int(s.get("playCount") or 0),
+            "like_count":    int(s.get("diggCount") or 0),
+            "comment_count": int(s.get("commentCount") or 0),
+            "share_count":   int(s.get("shareCount") or 0),
+            "duration":      int(vid_obj.get("duration", 0) or 0),
+            "video_url":     f"https://www.tiktok.com/@{uniq}/video/{vid_id}",
+            "cover_url":     vid_obj.get("cover", "") or "",
+        }
+    except Exception:
+        return None
+
+
+# ============================================================
+# TikTokApi: unified session for all pulls
+# ============================================================
+
+async def _run_all(usernames: list[str], liked_accounts: list[str],
+                   ms_token: str, videos_per_creator: int
+                   ) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
+    """Single Playwright session that does both:
+    1. Pull videos for each creator in `usernames`
+    2. Pull liked videos for each account in `liked_accounts`
+
+    Returns (creator_videos, liked_videos) dicts.
+    """
     from TikTokApi import TikTokApi
 
-    results: dict[str, list[dict]] = {}
+    creator_results: dict[str, list[dict]] = {}
+    liked_results: dict[str, list[dict]] = {}
+
+    success_count = 0
+    fail_count = 0
+
     async with TikTokApi() as api:
         await api.create_sessions(
             ms_tokens=[ms_token],
-            num_sessions=1,
-            sleep_after=3,
+            num_sessions=NUM_SESSIONS,
+            sleep_after=SLEEP_AFTER_SESSION,
             headless=True,
             browser="webkit",
+            enable_session_recovery=True,
+            allow_partial_sessions=True,
+            min_sessions=1,
         )
-        for u in usernames:
+
+        # --- Part 1: Creator videos ---
+        logger.info("--- Pulling videos for %d creators ---", len(usernames))
+        for i, u in enumerate(usernames):
             try:
                 user = api.user(username=u)
                 vids = []
-                async for v in user.videos(count=count):
-                    vd = v.as_dict
-                    a = vd.get("author", {}) or {}
-                    s = vd.get("stats", {}) or {}
-                    vid_obj = vd.get("video", {}) or {}
-                    vid_id = str(vd.get("id", ""))
-                    uniq = a.get("uniqueId") or u
-                    vids.append({
-                        "video_id":      vid_id,
-                        "author_unique": uniq,
-                        "caption":       vd.get("desc", "") or "",
-                        "create_time":   int(vd.get("createTime", 0)),
-                        "play_count":    int(s.get("playCount") or 0),
-                        "like_count":    int(s.get("diggCount") or 0),
-                        "comment_count": int(s.get("commentCount") or 0),
-                        "share_count":   int(s.get("shareCount") or 0),
-                        "duration":      int(vid_obj.get("duration", 0) or 0),
-                        "video_url":     f"https://www.tiktok.com/@{uniq}/video/{vid_id}",
-                        "cover_url":     vid_obj.get("cover", "") or "",
-                    })
-                results[u] = vids
-                logger.info("  @%s: %d videos", u, len(vids))
+                async for v in user.videos(count=videos_per_creator):
+                    shaped = _shape_video(v.as_dict, fallback_author=u)
+                    if shaped:
+                        vids.append(shaped)
+                creator_results[u] = vids
+                success_count += 1
+                if vids:
+                    logger.info("  [%d/%d] @%s: %d videos",
+                                i + 1, len(usernames), u, len(vids))
             except Exception as exc:
-                logger.warning("  @%s failed: %s", u, exc)
-                results[u] = []
-            await asyncio.sleep(2.0)
-    return results
+                fail_count += 1
+                # Only log first few failures to avoid spam
+                if fail_count <= 5:
+                    logger.warning("  [%d/%d] @%s failed: %s",
+                                   i + 1, len(usernames), u,
+                                   str(exc)[:100])
+                elif fail_count == 6:
+                    logger.warning("  ... suppressing further failure logs")
+                creator_results[u] = []
+            await asyncio.sleep(1.5)
 
+        logger.info("Creator videos: %d success, %d failed out of %d",
+                    success_count, fail_count, len(usernames))
 
-async def _pull_liked_videos(usernames: list[str],
-                             ms_token: str) -> dict[str, list[dict]]:
-    """Pull public liked videos for each account via TikTokApi."""
-    from TikTokApi import TikTokApi
-
-    results: dict[str, list[dict]] = {}
-    async with TikTokApi() as api:
-        await api.create_sessions(
-            ms_tokens=[ms_token],
-            num_sessions=1,
-            sleep_after=3,
-            headless=True,
-            browser="webkit",
-        )
-        for username in usernames:
+        # --- Part 2: Liked videos ---
+        logger.info("--- Pulling liked videos for %d accounts ---",
+                    len(liked_accounts))
+        for username in liked_accounts:
             try:
                 user = api.user(username=username)
                 vids = []
                 async for v in user.liked(count=200):
-                    vd = v.as_dict
-                    a = vd.get("author", {}) or {}
-                    s = vd.get("stats", {}) or {}
-                    vid_obj = vd.get("video", {}) or {}
-                    vid_id = str(vd.get("id", ""))
-                    uniq = a.get("uniqueId") or ""
-                    vids.append({
-                        "video_id":      vid_id,
-                        "author_unique": uniq,
-                        "nickname":      a.get("nickname") or "",
-                        "caption":       vd.get("desc", "") or "",
-                        "create_time":   int(vd.get("createTime", 0)),
-                        "play_count":    int(s.get("playCount") or 0),
-                        "like_count":    int(s.get("diggCount") or 0),
-                        "comment_count": int(s.get("commentCount") or 0),
-                        "share_count":   int(s.get("shareCount") or 0),
-                        "duration":      int(vid_obj.get("duration", 0) or 0),
-                        "video_url":     f"https://www.tiktok.com/@{uniq}/video/{vid_id}",
-                        "cover_url":     vid_obj.get("cover", "") or "",
-                    })
-                results[username] = vids
+                    shaped = _shape_video(v.as_dict)
+                    if shaped:
+                        vids.append(shaped)
+                liked_results[username] = vids
                 logger.info("  @%s liked: %d videos", username, len(vids))
             except Exception as exc:
-                logger.warning("  @%s liked failed: %s", username, exc)
-                results[username] = []
+                logger.warning("  @%s liked failed: %s", username, str(exc)[:100])
+                liked_results[username] = []
             await asyncio.sleep(2.0)
-    return results
+
+    return creator_results, liked_results
 
 
 # ============================================================
@@ -244,6 +267,22 @@ def _write_viral(viral_rows: list[dict]) -> int:
     return created
 
 
+def _write_liked(liked_vids: list[dict], region: str) -> int:
+    """Write liked videos to the liked_videos table."""
+    if not liked_vids:
+        return 0
+    from local_processor.account_tracker import bitable_io
+    written = bitable_io.write_liked_videos(liked_vids, source_account=region)
+    # Also write minimal creator records
+    unique_authors = {v["author_unique"] for v in liked_vids
+                      if v.get("author_unique")}
+    if unique_authors:
+        minimal = [{"unique_id": u, "nickname": "", "follower_count": 0}
+                   for u in unique_authors]
+        bitable_io.write_creators(minimal, f"liked_{region}")
+    return written
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -259,6 +298,7 @@ def _setup_logging():
 
 def main():
     _setup_logging()
+    t0 = time.time()
 
     ms_token = os.getenv("MS_TOKEN", "").strip()
     if not ms_token:
@@ -269,64 +309,49 @@ def main():
     # 1. Read creators from Bitable
     usernames = _fetch_creator_usernames()
     logger.info("Loaded %d creators from following_creators table", len(usernames))
-    if not usernames:
-        logger.info("No creators to scan"); return
 
-    # 2. Pull videos via TikTokApi
-    all_videos = asyncio.run(_pull_videos(usernames, ms_token, VIDEOS_PER_CREATOR))
+    # 2. Run everything in one Playwright session
+    creator_videos, liked_videos = asyncio.run(
+        _run_all(usernames, LIKED_ACCOUNTS, ms_token, VIDEOS_PER_CREATOR)
+    )
 
-    # 3. Filter: 1M+ plays in last 3 days
+    # 3. Filter creator videos: 1M+ plays in last 3 days
     now = int(time.time())
     cutoff = now - VIRAL_WINDOW_DAYS * 86400
     viral = []
-    for u, vids in all_videos.items():
+    total_vids_pulled = 0
+    for u, vids in creator_videos.items():
+        total_vids_pulled += len(vids)
         for v in vids:
             ct = int(v.get("create_time") or 0)
             plays = int(v.get("play_count") or 0)
             if ct >= cutoff and plays >= VIRAL_MIN_PLAYS:
                 viral.append(v)
 
-    logger.info("Found %d viral videos (>=%dM in %dd) across %d creators",
-                len(viral), VIRAL_MIN_PLAYS // 1_000_000,
-                VIRAL_WINDOW_DAYS, len(all_videos))
+    logger.info("Scanned %d total videos across %d creators",
+                total_vids_pulled, len(creator_videos))
+    logger.info("Found %d viral videos (>=%dM in %dd)",
+                len(viral), VIRAL_MIN_PLAYS // 1_000_000, VIRAL_WINDOW_DAYS)
 
-    # 4. Write to Bitable
+    # 4. Write viral hits
     if viral:
         _write_viral(viral)
     else:
         logger.info("No viral hits this run")
 
-    # ============================================================
-    # 5. Pull public liked videos from tracked accounts
-    # ============================================================
-    logger.info("--- Pulling liked videos from %d accounts ---", len(LIKED_ACCOUNTS))
-    liked_results = asyncio.run(_pull_liked_videos(LIKED_ACCOUNTS, ms_token))
-
-    now = int(time.time())
+    # 5. Process liked videos
     liked_cutoff = now - LIKED_MAX_AGE_DAYS * 86400
-
-    for username, liked_vids in liked_results.items():
+    for username, vids in liked_videos.items():
         region = "us" if username == "powerfuljourney" else "jp"
-        recent = [v for v in liked_vids
-                  if int(v.get("create_time") or 0) >= liked_cutoff]
-        logger.info("  @%s: %d liked total, %d within %d days",
-                    username, len(liked_vids), len(recent), LIKED_MAX_AGE_DAYS)
+        recent = [v for v in vids if int(v.get("create_time") or 0) >= liked_cutoff]
+        logger.info("Liked @%s: %d total, %d within %d days",
+                    username, len(vids), len(recent), LIKED_MAX_AGE_DAYS)
         if recent:
-            from local_processor.account_tracker import bitable_io
-            written = bitable_io.write_liked_videos(recent, source_account=region)
-            logger.info("  @%s: %d written to liked_videos table", username, written)
+            written = _write_liked(recent, region)
+            logger.info("  @%s: %d written", username, written)
 
-            # Also write authors to creators table
-            unique_authors = {v["author_unique"] for v in recent if v.get("author_unique")}
-            author_details = []
-            for uniq in list(unique_authors)[:80]:
-                # Use TikTokApi to get user info (lightweight)
-                pass  # profile enrichment handled by account-tracker
-            if unique_authors:
-                # Write minimal creator records
-                minimal = [{"unique_id": u, "nickname": "", "follower_count": 0}
-                           for u in unique_authors]
-                bitable_io.write_creators(minimal, f"liked_{region}")
+    elapsed = time.time() - t0
+    logger.info("=== viral_scan finished in %.1f minutes ===", elapsed / 60)
 
 
 if __name__ == "__main__":
