@@ -1,0 +1,33 @@
+name: Keep Alive
+
+# GitHub silently disables scheduled workflows after ~60 days of repo
+# inactivity, and slows them down when the repo has no recent commits.
+# This minimal workflow makes a tiny commit every 5 days to keep the
+# repository "active" so all the scheduled scans keep firing reliably.
+
+on:
+  schedule:
+    - cron: "0 6 */5 * *"   # every 5 days at 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Touch keepalive file
+        run: |
+          mkdir -p .keepalive
+          date -u +%FT%TZ > .keepalive/last_ping
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .keepalive/last_ping
+          if git diff --cached --quiet; then
+            echo "No changes"; exit 0
+          fi
+          git commit -m "chore: keepalive ping"
+          git push
