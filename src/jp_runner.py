@@ -18,12 +18,14 @@ from TikTokApi import TikTokApi
 from . import db, jp_config
 from .classifier import classify_tier as base_classify_tier, detect_language, evaluate_creator, is_movie_commentary
 from .config import (
-    BROWSER, HEADLESS, SESSION_SLEEP_AFTER, WINDOW_DAYS,
+    BROWSER, HEADLESS, SESSION_SLEEP_AFTER,
 )
 from .followers import backfill_followers as backfill_followers_global
 
 logger = logging.getLogger(__name__)
-WINDOW_SECONDS = WINDOW_DAYS * 24 * 3600
+# JP uses a wider posting-age window than US so that 7-day RED tier
+# (newly relaxed) actually qualifies. Computed from JP_TIERS' max age.
+WINDOW_SECONDS = max(t[4] for t in jp_config.JP_TIERS) * 3600
 
 
 # ============================================================
