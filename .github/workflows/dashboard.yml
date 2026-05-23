@@ -35,8 +35,6 @@ jobs:
           FEISHU_APP_ID:          ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET:      ${{ secrets.FEISHU_APP_SECRET }}
           BITABLE_APP_TOKEN:      ${{ secrets.BITABLE_APP_TOKEN }}
-          BITABLE_VIDEOS_TABLE:   ${{ secrets.BITABLE_VIDEOS_TABLE }}
-          BITABLE_CREATORS_TABLE: ${{ secrets.BITABLE_CREATORS_TABLE }}
         run: python scripts/export_dashboard.py
       - uses: actions/upload-pages-artifact@v3
         with:

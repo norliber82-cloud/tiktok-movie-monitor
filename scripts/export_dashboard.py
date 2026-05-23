@@ -1,17 +1,22 @@
-"""Read both Bitable tables via tenant access token and dump two JSON files
-into dashboard/ for the static site to consume."""
+#!/usr/bin/env python3
+"""Export all 4 Bitable tables into dashboard JSON files."""
 
 from __future__ import annotations
-
-import json
-import os
-import pathlib
-import time
-
+import json, os, pathlib, time
 import requests
 
 API_BASE = "https://open.feishu.cn/open-apis"
 OUT_DIR = pathlib.Path("dashboard")
+
+# Table IDs (hardcoded for reliability — same as monitoring workflow)
+TABLES = {
+    "us_videos":   "tblrY6LqfrQsc1qv",
+    "us_creators": "tbl7L9IRcsfPAk1k",
+    "jp_videos":   "tblGCE433yHlyi19",
+    "jp_creators": "tbl0rNNay2uZb3zv",
+}
+
+REGION_MAP = {"us": "en", "jp": "ja"}
 
 
 def _env(k: str) -> str:
@@ -32,18 +37,17 @@ def tenant_token() -> str:
 
 def fetch_all(table_id: str, token: str) -> list[dict]:
     app_token = _env("BITABLE_APP_TOKEN")
-    url = (f"{API_BASE}/bitable/v1/apps/{app_token}"
-           f"/tables/{table_id}/records")
+    url = f"{API_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records"
     headers = {"Authorization": f"Bearer {token}"}
     records = []
     page_token = None
-    for _ in range(20):  # up to 20 pages * 500 = 10k
+    for _ in range(20):
         params = {"page_size": 500}
         if page_token:
             params["page_token"] = page_token
         resp = requests.get(url, headers=headers, params=params, timeout=30).json()
         if resp.get("code") != 0:
-            print(f"fetch failed: {resp}")
+            print(f"  fetch failed: {resp.get('msg')}")
             break
         data = resp.get("data", {})
         for rec in data.get("items", []):
@@ -55,7 +59,6 @@ def fetch_all(table_id: str, token: str) -> list[dict]:
 
 
 def _clean(records: list[dict]) -> list[dict]:
-    """Unpack Feishu's hyperlink/person-array wrappers into plain scalars."""
     out = []
     for rec in records:
         clean = {}
@@ -72,23 +75,38 @@ def _clean(records: list[dict]) -> list[dict]:
 
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
-
     token = tenant_token()
 
-    videos_table = _env("BITABLE_VIDEOS_TABLE")
-    creators_table = _env("BITABLE_CREATORS_TABLE")
+    all_videos = []
+    all_creators = []
 
-    videos = _clean(fetch_all(videos_table, token)) if videos_table else []
-    creators = _clean(fetch_all(creators_table, token)) if creators_table else []
+    for key, table_id in TABLES.items():
+        region, kind = key.split("_")
+        print(f"Fetching {key} ({table_id})...")
+        records = _clean(fetch_all(table_id, token))
+        
+        # Tag every record with its region
+        for r in records:
+            r["_region"] = region.upper()
+            if "语言" not in r:
+                r["语言"] = REGION_MAP[region]
+        
+        if "videos" in kind:
+            all_videos.extend(records)
+        else:
+            all_creators.extend(records)
 
     now = int(time.time() * 1000)
+
     (OUT_DIR / "videos.json").write_text(
-        json.dumps({"generated_at": now, "items": videos}, ensure_ascii=False),
+        json.dumps({"generated_at": now, "items": all_videos}, ensure_ascii=False),
         encoding="utf-8")
     (OUT_DIR / "creators.json").write_text(
-        json.dumps({"generated_at": now, "items": creators}, ensure_ascii=False),
+        json.dumps({"generated_at": now, "items": all_creators}, ensure_ascii=False),
         encoding="utf-8")
-    print(f"Exported: {len(videos)} videos, {len(creators)} creators")
+
+    print(f"Done: {len(all_videos)} videos ({sum(1 for v in all_videos if v.get('_region')=='JP')} JP), "
+          f"{len(all_creators)} creators ({sum(1 for c in all_creators if c.get('_region')=='JP')} JP)")
 
 
 if __name__ == "__main__":
