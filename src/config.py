@@ -84,6 +84,14 @@ KEYWORDS_OUT = [
     # Non-commentary genres
     "tiktok dance", "cosplay", "thirst trap", "tribute",
     "videogame", "gaming",
+    # Analysis / theory / episode breakdown (not narrative recap)
+    "fan theory", "theory(", "explained!", "breakdown",
+    "easter egg", "hidden detail", "did you notice",
+    "episode", "series finale", "season",
+    "what's next", "ending explained",
+    # Horror story / creepypasta (not film commentary)
+    "story written by", "creepy story", "scary story",
+    "recorded herself", "long-legged",
     # Merch / news / list posts
     "popcorn", "goods", "merch",
     "best movies for you", "movies for you",
