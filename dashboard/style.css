@@ -111,3 +111,50 @@ footer {
   padding: 14px 28px; border-top: 1px solid var(--border);
   color: var(--muted); font-size: 11.5px;
 }
+
+/* Review mode */
+#review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #2a2a3e;
+  border-bottom: 1px solid #444;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+#review-bar button {
+  padding: 6px 14px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #333;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 13px;
+}
+#review-bar button:hover { background: #444; }
+.btn-review-toggle {
+  padding: 4px 12px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #333;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 12px;
+  vertical-align: middle;
+}
+.btn-review-toggle:hover { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+.cb-review {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 18px;
+  height: 18px;
+  accent-color: #e74c3c;
+  z-index: 10;
+  cursor: pointer;
+}
+.card { position: relative; }
+#btn-hermes { font-weight: bold; }

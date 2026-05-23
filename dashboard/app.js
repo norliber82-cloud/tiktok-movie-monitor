@@ -38,6 +38,84 @@ function ageShort(ms) {
 
 /* ------------- Videos tab ------------- */
 
+
+/* ------------ Review mode ------------ */
+let selected = new Set();
+let reviewMode = false;
+
+function toggleReview() {
+  reviewMode = !reviewMode;
+  document.getElementById("review-bar").style.display = reviewMode ? "flex" : "none";
+  document.querySelectorAll(".cb-review").forEach(cb => { cb.style.display = reviewMode ? "inline" : "none"; });
+  if (!reviewMode) { selected.clear(); updateReviewCount(); }
+}
+
+function selAll() {
+  if (!reviewMode) return;
+  const filtered = getFilteredVideos();
+  if (selected.size === filtered.length) { selected.clear(); }
+  else { filtered.forEach(v => selected.add(v._record_id || v.video_id)); }
+  updateReviewCount();
+  document.querySelectorAll(".cb-review").forEach(cb => {
+    const vid = cb.dataset.id;
+    cb.checked = selected.has(vid);
+  });
+}
+
+function toggleVideo(e, id) {
+  if (e.target.checked) selected.add(id);
+  else selected.delete(id);
+  updateReviewCount();
+}
+
+function updateReviewCount() {
+  document.getElementById("review-count").textContent = selected.size;
+}
+
+function sendToHermes() {
+  if (selected.size === 0) return;
+  const filtered = getFilteredVideos();
+  const toDelete = filtered.filter(v => selected.has(v._record_id || v.video_id));
+  
+  // Group by region
+  const jp = toDelete.filter(v => v._region === 'JP');
+  const us = toDelete.filter(v => v._region === 'US');
+  
+  let cmd = "删除以下飞书视频记录:\n\n";
+  if (jp.length) {
+    cmd += `JP Videos (tblGCE433yHlyi19) — ${jp.length}条:\n`;
+    jp.forEach(v => { cmd += `${v._record_id}\t${(v.caption||'').slice(0,50).replace(/\n/g,' ')}\n`; });
+    cmd += "\n";
+  }
+  if (us.length) {
+    cmd += `US Videos (tblrY6LqfrQsc1qv) — ${us.length}条:\n`;
+    us.forEach(v => { cmd += `${v._record_id}\t${(v.caption||'').slice(0,50).replace(/\n/g,' ')}\n`; });
+  }
+  
+  navigator.clipboard.writeText(cmd).then(() => {
+    const btn = document.getElementById("btn-hermes");
+    btn.textContent = "✅ 已复制! 粘贴给 Hermes";
+    setTimeout(() => { btn.textContent = `📋 发送给 Hermes (${selected.size}条)`; }, 2000);
+  });
+}
+
+function getFilteredVideos() {
+  const plat = document.getElementById("f-platform").value;
+  const lang = document.getElementById("f-language").value;
+  const tier = document.getElementById("f-tier").value;
+  const q = document.getElementById("f-q").value.trim().toLowerCase();
+  return VIDEOS.filter(v => {
+    if (plat && v.platform !== plat) return false;
+    if (lang && v.language !== lang) return false;
+    if (tier && v.tier !== tier) return false;
+    if (q) {
+      const txt = ((v.caption||"") + " " + (v.author||"") + " " + (v.tags||"")).toLowerCase();
+      if (!txt.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
 function renderVideos() {
   const plat = document.getElementById("f-platform").value;
   const lang = document.getElementById("f-language").value;
@@ -68,6 +146,16 @@ function renderVideos() {
     card.href = v.video_url || "#";
     card.target = "_blank";
     card.rel = "noopener";
+
+    // Review checkbox
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "cb-review";
+    cb.dataset.id = v._record_id || v.video_id;
+    cb.style.display = reviewMode ? "inline" : "none";
+    cb.checked = selected.has(v._record_id || v.video_id);
+    cb.addEventListener("change", (e) => toggleVideo(e, cb.dataset.id));
+    card.appendChild(cb);
 
     const cover = document.createElement("img");
     cover.className = "cover";
@@ -123,6 +211,13 @@ function renderVideos() {
 }
 
 /* ------------- Creators tab ------------- */
+
+  // Sync checkboxes with review mode
+  document.querySelectorAll(".cb-review").forEach(cb => {
+    cb.style.display = reviewMode ? "inline" : "none";
+    cb.checked = selected.has(cb.dataset.id);
+  });
+  updateReviewCount();
 
 function renderCreators() {
   const lang = document.getElementById("c-language").value;

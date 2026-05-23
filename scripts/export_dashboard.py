@@ -91,7 +91,9 @@ def fetch_all(table_id: str, token: str) -> list[dict]:
             break
         data = resp.get("data", {})
         for rec in data.get("items", []):
-            records.append(rec.get("fields", {}))
+            fields = rec.get("fields", {})
+            fields["_record_id"] = rec.get("record_id", "")
+            records.append(fields)
         page_token = data.get("page_token")
         if not data.get("has_more"):
             break

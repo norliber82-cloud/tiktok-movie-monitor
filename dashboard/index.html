@@ -12,8 +12,17 @@
     <div class="meta">
       <span id="generated-at">loading…</span>
       <span id="totals"></span>
+      <button id="btn-review-header" onclick="toggleReview()" class="btn-review-toggle">📋 审核</button>
     </div>
   </header>
+  <div id="review-bar" style="display:none">
+    <button id="btn-review" onclick="toggleReview()">📋 审核模式</button>
+    <span style="flex:1"></span>
+    <button onclick="selAll()">☑️ 全选/取消</button>
+    <span id="review-count" style="font-weight:bold;margin:0 12px">0</span>
+    <button id="btn-hermes" onclick="sendToHermes()" style="background:#e74c3c;color:#fff">📋 发送给 Hermes</button>
+  </div>
+
 
   <nav class="tabs">
     <button data-tab="videos" class="active">Videos</button>
