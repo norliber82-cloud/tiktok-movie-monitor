@@ -8,7 +8,6 @@ import requests
 API_BASE = "https://open.feishu.cn/open-apis"
 OUT_DIR = pathlib.Path("dashboard")
 
-# Table IDs (hardcoded for reliability — same as monitoring workflow)
 TABLES = {
     "us_videos":   "tblrY6LqfrQsc1qv",
     "us_creators": "tbl7L9IRcsfPAk1k",
@@ -17,6 +16,47 @@ TABLES = {
 }
 
 REGION_MAP = {"us": "en", "jp": "ja"}
+
+# Field name mapping: 飞书中文 → dashboard JS expects
+VIDEO_FIELD_MAP = {
+    "视频URL": "video_url",
+    "封面URL": "cover_url",
+    "等级": "tier",
+    "平台": "platform",
+    "语言": "language",
+    "作者": "author",
+    "标题": "caption",
+    "播放量": "play_count",
+    "点赞数": "like_count",
+    "评论数": "comment_count",
+    "分享数": "share_count",
+    "发布时间": "create_time",
+    "时长(秒)": "duration",
+    "标签": "tags",
+    "匹配标签": "matched_tag",
+    "原片名": "film_title",
+    "可信度": "confidence",
+    "视频ID": "video_id",
+}
+
+CREATOR_FIELD_MAP = {
+    "主页URL": "profile_url",
+    "作者": "author_unique",
+    "用户名": "author_unique",
+    "昵称": "nickname",
+    "粉丝数": "followers",
+    "中位播放": "median_plays",
+    "7日最高播放": "max_plays_7d",
+    "14日发帖数": "posts_14d",
+    "30日发帖数": "posts_30d",
+    "垂直度": "vertical_ratio",
+    "评估时间": "evaluated_at",
+    "总点赞": "total_likes",
+    "视频数": "video_count",
+    "评估": "eval_status",
+    "来源": "source",
+    "简介": "bio",
+}
 
 
 def _env(k: str) -> str:
@@ -58,17 +98,21 @@ def fetch_all(table_id: str, token: str) -> list[dict]:
     return records
 
 
-def _clean(records: list[dict]) -> list[dict]:
+def _clean(records: list[dict], is_creator: bool = False) -> list[dict]:
+    field_map = CREATOR_FIELD_MAP if is_creator else VIDEO_FIELD_MAP
     out = []
     for rec in records:
         clean = {}
         for k, v in rec.items():
+            # Unpack Feishu link/array wrappers
             if isinstance(v, dict) and "link" in v:
-                clean[k] = v.get("link")
+                v = v.get("link")
             elif isinstance(v, list) and v and isinstance(v[0], dict) and "text" in v[0]:
-                clean[k] = "".join(x.get("text", "") for x in v)
-            else:
-                clean[k] = v
+                v = "".join(x.get("text", "") for x in v)
+            
+            # Map to English field name
+            new_key = field_map.get(k, k)
+            clean[new_key] = v
         out.append(clean)
     return out
 
@@ -82,19 +126,27 @@ def main() -> None:
 
     for key, table_id in TABLES.items():
         region, kind = key.split("_")
+        is_creator = "creators" in kind
         print(f"Fetching {key} ({table_id})...")
-        records = _clean(fetch_all(table_id, token))
+        records = _clean(fetch_all(table_id, token), is_creator=is_creator)
         
-        # Tag every record with its region
         for r in records:
             r["_region"] = region.upper()
-            if "语言" not in r:
-                r["语言"] = REGION_MAP[region]
+            if "language" not in r:
+                r["language"] = REGION_MAP[region]
+            # Ensure play_count and like_count are numbers
+            for num_field in ["play_count", "like_count", "comment_count", "share_count",
+                              "followers", "median_plays", "max_plays_7d", "posts_14d", "posts_30d"]:
+                if num_field in r and r[num_field] is not None:
+                    try:
+                        r[num_field] = int(r[num_field])
+                    except (ValueError, TypeError):
+                        r[num_field] = 0
         
-        if "videos" in kind:
-            all_videos.extend(records)
-        else:
+        if is_creator:
             all_creators.extend(records)
+        else:
+            all_videos.extend(records)
 
     now = int(time.time() * 1000)
 
