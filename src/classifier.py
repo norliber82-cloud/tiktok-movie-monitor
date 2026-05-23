@@ -21,6 +21,35 @@ from .config import (
     TIERS,
 )
 
+# ------------------------- creator name/bio filter -------------------------
+
+# Creator name or bio containing these patterns → likely non-film account
+CREATOR_NON_FILM_PATTERNS = [
+    "leather", "architect", "builder", "construction",
+    "photographer", "dance", "dancer", "choreograph",
+    "singer", "rapper", "musician", "producer",
+    "dj ", "d.j.", "beatmaker",
+    "makeup", "beauty", "fashion", "model",
+    "food", "chef", "baker", "travel",
+    "fitness", "gym", "trainer", "yoga",
+    "nft", "crypto", "bitcoin",
+    "goods", "merch", "shop", "store",
+    "gaming", "gamer", "esports",
+]
+
+
+def is_film_creator(name: str, bio: str) -> bool:
+    """Quick filter: returns False if creator is clearly non-film."""
+    combined = f"{name or ''} {bio or ''}".lower()
+    for pattern in CREATOR_NON_FILM_PATTERNS:
+        if pattern in combined:
+            # Allow if also has film/movie signals
+            if any(signal in combined for signal in ["movie", "film", "cinema", "recap", "映画"]):
+                continue
+            return False
+    return True
+
+
 _HASHTAG_WHITELIST = {h.lower() for h in (HASHTAGS + DISCOVERY_HASHTAGS)} | {
     "movie", "film", "cinema", "movies", "films", "映画", "电影", "影视",
 }
@@ -51,9 +80,13 @@ def is_movie_commentary(caption: str, hashtags: list[str]) -> bool:
     if not has_keyword and not has_tag:
         return False
 
-    # Layer 2: content quality — must have meaningful text beyond hashtags
+    # Layer 2: content quality — must have text OR valid film hashtags
     text_only = re.sub(r'#\S+', '', caption or '').strip()
-    if len(text_only) < 5:
+    # Allow hashtag-only captions IF they contain film commentary tags
+    FILM_ONLY_TAGS = {"movie", "film", "movietok", "filmtok", "movierecap", 
+                      "映画", "映画解説", "映画紹介", "映画鑑賞", "电影解说", "影视解说"}
+    has_film_only_tag = bool(tag_set & FILM_ONLY_TAGS)
+    if len(text_only) < 5 and not has_film_only_tag:
         return False
 
     # Layer 3: anti-clip patterns (raw footage / full movie repost / series parts)

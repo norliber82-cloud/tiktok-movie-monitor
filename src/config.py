@@ -21,7 +21,7 @@ HASHTAGS_EN = [
     "crimemovies", "a24films", "marvelstudios", "dcfilms",
     "netflixoriginal", "moviereaction", "moviefacts",
     "bestmoviescenes", "moviequotes", "filmnerd",
-    "movieclips", "cinematography", "classicmovies", "indiefilm",
+    "classicmovies", "indiefilm",
 ]
 
 HASHTAGS_JA = [
@@ -75,9 +75,22 @@ KEYWORDS_IN = [
 ]
 
 KEYWORDS_OUT = [
+    # Clips / edits / reposts
     "fan edit", "fancam", "fan cam", "compilation of",
-    "tiktok dance", "cosplay", " edit ", "edit)", "edit.",
-    "thirst trap", "tribute",
+    " edit ", "edit)", "edit.", "hollywoodedits",
+    "movieclips", "epicscenes", "cinematicmoments",
+    # Behind-the-scenes / bloopers / trailers
+    "bloopers", "behind the scenes", "trailer",
+    # Non-commentary genres
+    "tiktok dance", "cosplay", "thirst trap", "tribute",
+    "videogame", "gaming",
+    # Merch / news / list posts
+    "popcorn", "goods", "merch",
+    "best movies for you", "movies for you",
+    "guess the movie", "blow this up",
+    # Reaction / engagement bait
+    "did you know", "what's the difference",
+    "how many.*movies.*seen",
 ]
 
 # =========================================================

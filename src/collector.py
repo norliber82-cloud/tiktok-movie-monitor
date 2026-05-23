@@ -13,6 +13,7 @@ from .classifier import (
     classify_tier,
     detect_language,
     evaluate_creator,
+    is_film_creator,
     is_movie_commentary,
 )
 from .confidence import score as confidence_score
