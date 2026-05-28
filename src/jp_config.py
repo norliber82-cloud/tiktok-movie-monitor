@@ -102,9 +102,9 @@ JP_ALLOWED_LANGUAGES = {"ja"}
 # we relax further to surface more candidates.
 # =========================================================
 JP_TIERS = [
-    ("RED",    "🔥🇯🇵 300K+ · 7d",    "red",    300_000, 168, 1),
-    ("ORANGE", "🟧🇯🇵 100K+ · 5d",   "orange", 100_000, 120, 2),
-    ("YELLOW", "🟡🇯🇵 30K+ · 3d",    "yellow",  30_000,  72, 3),
+    ("RED",    "🔥🇯🇵 200K+ · 7d",    "red",    200_000, 168, 1),
+    ("ORANGE", "🟧🇯🇵 80K+ · 7d",    "orange",  80_000, 168, 2),
+    ("YELLOW", "🟡🇯🇵 25K+ · 5d",    "yellow",  25_000, 120, 3),
 ]
 
 # =========================================================
@@ -125,7 +125,216 @@ JP_CREATOR_VIRAL_MIN           = 200_000
 JP_CREATORS_EVAL_BUDGET        = 100
 
 # =========================================================
-# Duration filter
+# Duration filter — JP commentary videos are typically 30s-5min.
+# Bumping the minimum from 20 to 30 cuts out memes / clips while
+# keeping legitimate short recaps.
 # =========================================================
-JP_MIN_DURATION_SECONDS = 20
+JP_MIN_DURATION_SECONDS = 30
 JP_MAX_DURATION_SECONDS = 600
+
+
+# =========================================================
+# JP-specific filters — designed for VOICEOVER COMMENTARY ONLY
+#
+# Goal: only collect videos where:
+#   - Visual: clips of movie/TV footage being shown
+#   - Audio: narrator voiceover explaining the plot/scenes
+#   - NOT: creator on-camera reviewing or discussing
+#
+# This is hard to tell from caption alone — these signals are
+# heuristics, not perfect. Combined with whitelist + AI vision
+# (separate Gemini workflow) for full coverage.
+# =========================================================
+
+# === Voiceover-narration signals (third-person plot description) ===
+# These are the kind of phrases that almost always belong to a
+# voiceover narrating a movie's events ("the protagonist did X,
+# then Y happened"). Strong positive signal.
+JP_NARRATIVE_SIGNALS = [
+    # Third-person subject markers
+    "少女が", "少女は", "少年が", "少年は",
+    "主人公は", "主人公が", "彼は", "彼女は", "彼らは",
+    "男は", "女は", "男が", "女が",
+    "親子は", "夫婦は", "兄弟は",
+    # Plot-progression connectors (narrator sentences)
+    "ある日", "そして", "しかし", "実は",
+    "なんと", "驚くべき", "突然", "次の瞬間",
+    "目覚めると", "気づくと", "やがて",
+    "最後には", "最終的に", "結末では",
+    # Plot-action verbs in narration tense
+    "解読", "発見", "巻き込まれ", "目撃",
+    "襲われる", "追い詰められ", "逃げ出す",
+    # Narrative time markers
+    "数年後", "数日後", "翌日", "それから",
+]
+
+# === On-camera / personal-opinion signals (the creator IS the speaker) ===
+# These signal the creator is on-camera or talking AS themselves
+# (review / opinion / list video). We DOWNGRADE these.
+JP_ON_CAMERA_SIGNALS = [
+    # First-person pronouns
+    "私は", "僕は", "俺は", "私が",
+    # Personal opinion phrases
+    "個人的に", "個人的な", "私的に",
+    "好きなシーン", "お気に入り", "オススメは",
+    "ベスト", "ランキング",
+    # Q&A / list format (typically on-camera)
+    "実写化するなら", "選ぶなら",
+    "皆さんは", "あなたは", "教えてください",
+    # Direct address (on-camera reviewer)
+    "今回は", "今日は紹介",
+    "見てみて", "見てください",
+    "コメントで",
+    # Critic/review style
+    "レビュー回", "オススメ動画",
+]
+
+# === Strong commentary keywords (kept from before, refined) ===
+# These almost guarantee voiceover commentary IF NOT combined with
+# on-camera signals.
+JP_STRONG_SIGNAL_KEYWORDS = [
+    "解説", "解説動画", "ネタバレ",
+    "あらすじ", "ストーリー解説", "物語の",
+    "ラストシーン", "結末解説",
+    "監督", "脚本", "主演",
+    "新作映画", "公開予定",
+    # NOTE: "考察" / "見どころ" REMOVED — these often appear in
+    # on-camera analysis videos too.
+]
+
+# === Hard exclusions (no commentary value at all) ===
+JP_KEYWORDS_OUT = [
+    # Stage / theater / musical
+    "劇団四季", "舞台レビュー", "ミュージカル",
+    "舞台で", "演劇", "宝塚",
+    # Short film / original content (not commentary)
+    "ショートフィルム", "ショートドラマ", "kowazo",
+    "オリジナル映画", "自主制作", "自作映画",
+    # Meme / parody / comedy clip
+    "平常運転", "吉本", "コント", "ものまね",
+    # Behind-the-scenes / making-of (not commentary)
+    "撮影現場", "メイキング", "セット見学",
+    # Personal journal / vlog (not film analysis)
+    "今日の出来事", "私の日常",
+    # Live concert / event
+    "ライブ", "コンサート", "舞台挨拶",
+    # Trailer-only repost
+    "予告編", "予告解禁", "新CM",
+    # Manga / book review (not film)
+    "漫画レビュー", "原作小説",
+    # Cosplay / fan goods
+    "コスプレ", "グッズ紹介",
+    # Real-person fan discussion (idol / actor focus, not film)
+    "推し活", "ファン交流", "握手会",
+]
+
+
+# =========================================================
+# Verified voiceover commentary author whitelist
+# Built from your JP liked videos + JP videos table (creators
+# with 2+ tier-hits over time). These are heuristic high-confidence
+# but NOT 100% — used as a positive signal, not auto-accept.
+# =========================================================
+JP_AUTHOR_WHITELIST = [
+    "ailene.sylvia",
+    "celeste.leah1",
+    "cochran.drew",
+    "csrb016",
+    "drz2e6",
+    "geleraparwejgill",
+    "has0dcmrh3",
+    "iaaywsgyevg",
+    "jovay56",
+    "jptenny",
+    "kingfilm73",
+    "kotonoha76",
+    "maruta_eiga",
+    "pearson.clara",
+    "qtswi24313",            # added: confirmed voiceover style
+    "returnpijk9",
+    "rising.cut",
+    "rosiemovie3",
+    "rxlhwlwi1ff",
+    "shohei_movie",
+    "user14288137314685",
+    "user1468540117676",
+    "user1701384797009",
+    "user2184467748220",
+    "user3622256530160",     # added: confirmed voiceover (少女体験)
+    "user48872371381513",
+    "user49167986716517",
+    "user5117521598335",
+    "user516774066904",
+    "user5220214481525",
+    "user6502581233131",
+    "vjklrluao03167",
+    "good_story_97",         # added: confirmed voiceover style
+]
+
+
+# =========================================================
+# Scoring function — combines all the heuristics above to
+# decide whether a JP video is voiceover commentary.
+# Returns ("KEEP" | "DROP", confidence, reason)
+# =========================================================
+def jp_classify_voiceover(caption: str, hashtags: list,
+                          author_unique: str = "",
+                          duration: int = 0) -> tuple[str, str, str]:
+    """Determines if a JP video is voiceover-style movie commentary.
+
+    Returns:
+      verdict   : "KEEP" / "DROP"
+      confidence: "高" / "中" / "低"
+      reason    : human-readable string
+    """
+    cap_lower = (caption or "").lower()
+    author = (author_unique or "").strip().lstrip("@")
+
+    # Hard exclusions first
+    for bad in JP_KEYWORDS_OUT:
+        if bad.lower() in cap_lower:
+            return ("DROP", "低", f"hard_exclude:{bad}")
+
+    # Score signals
+    narrative_hits = sum(1 for sig in JP_NARRATIVE_SIGNALS
+                         if sig in caption)
+    on_camera_hits = sum(1 for sig in JP_ON_CAMERA_SIGNALS
+                         if sig in caption)
+    strong_hits = sum(1 for kw in JP_STRONG_SIGNAL_KEYWORDS
+                      if kw in caption)
+    in_whitelist = author.lower() in {a.lower() for a in JP_AUTHOR_WHITELIST}
+
+    # Decision tree
+    # 1. Heavy on-camera signal → DROP
+    if on_camera_hits >= 2 and narrative_hits == 0:
+        return ("DROP", "低",
+                f"on_camera={on_camera_hits} narrative=0")
+
+    # 2. Whitelist + any positive signal → KEEP high
+    if in_whitelist and (narrative_hits >= 1 or strong_hits >= 1):
+        return ("KEEP", "高",
+                f"whitelist+narr={narrative_hits} strong={strong_hits}")
+
+    # 3. Whitelist alone → KEEP medium (might be borderline)
+    if in_whitelist:
+        return ("KEEP", "中", "whitelist_only")
+
+    # 4. Strong narrative signal (3+ hits) → KEEP high
+    if narrative_hits >= 3:
+        return ("KEEP", "高",
+                f"strong_narrative={narrative_hits}")
+
+    # 5. Mix of narrative + strong keywords → KEEP medium
+    if narrative_hits >= 1 and strong_hits >= 1:
+        return ("KEEP", "中",
+                f"narr={narrative_hits} strong={strong_hits}")
+
+    # 6. Strong keywords only, no narrative + no on-camera → KEEP low
+    # (could be either, give benefit of doubt for now)
+    if strong_hits >= 2 and on_camera_hits == 0:
+        return ("KEEP", "低",
+                f"strong_kw={strong_hits} but no narrative")
+
+    # 7. Default: drop ambiguous
+    return ("DROP", "低",
+            f"ambiguous narr={narrative_hits} oncam={on_camera_hits} strong={strong_hits}")

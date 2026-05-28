@@ -101,7 +101,8 @@ def _to_video_row(vid: dict, matched_tag: str, now_ts: int) -> Optional[dict]:
 async def _scan_hashtag(api, tag: str, limit: int, is_discovery: bool,
                        now_ts: int) -> tuple[int, int, int]:
     """Scan one hashtag for JP content. Same shape as the global collector,
-    but uses JP_TIERS + JP_ALLOWED_LANGUAGES + JP duration limits."""
+    but uses JP_TIERS + JP_ALLOWED_LANGUAGES + JP duration limits +
+    voiceover-commentary scoring (not on-camera reviews)."""
     total = tier_hits = seeds = 0
     try:
         async for video in api.hashtag(name=tag).videos(count=limit):
@@ -111,9 +112,22 @@ async def _scan_hashtag(api, tag: str, limit: int, is_discovery: bool,
             if not parsed:
                 continue
 
+            # Layer 1: global movie-commentary check (keyword/hashtag whitelist)
             is_mc = is_movie_commentary(parsed["caption"], parsed["tag_list"])
+            if not is_mc:
+                continue
 
-            if parsed["author_unique"] and is_mc:
+            # Layer 2: JP voiceover-vs-on-camera classifier
+            verdict, confidence, reason = jp_config.jp_classify_voiceover(
+                caption=parsed["caption"],
+                hashtags=parsed["tag_list"],
+                author_unique=parsed["author_unique"],
+                duration=parsed.get("duration", 0),
+            )
+            if verdict == "DROP":
+                continue
+
+            if parsed["author_unique"]:
                 db.touch_author_candidate(
                     author_unique=parsed["author_unique"],
                     author_id=parsed["author_id"],
@@ -125,7 +139,7 @@ async def _scan_hashtag(api, tag: str, limit: int, is_discovery: bool,
             posting_age_ok = (parsed["create_time"] != 0 and
                               now_ts - parsed["create_time"] <= WINDOW_SECONDS)
 
-            if is_mc and posting_age_ok:
+            if posting_age_ok:
                 # JP-only language filter
                 if parsed["language"] not in jp_config.JP_ALLOWED_LANGUAGES:
                     continue
@@ -136,6 +150,8 @@ async def _scan_hashtag(api, tag: str, limit: int, is_discovery: bool,
 
                 row = {k: v for k, v in parsed.items()
                        if k not in ("tag_list", "nickname")}
+                # Confidence comes straight from voiceover classifier
+                row["confidence"] = confidence
                 if is_discovery:
                     row["tier"] = None
                     db.upsert_video(row)
